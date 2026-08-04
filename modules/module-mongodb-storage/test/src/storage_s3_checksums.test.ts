@@ -50,17 +50,15 @@ describe('V3 checksums with S3 object storage', () => {
     await writer.commit('1/1');
     const checkpoint = await bucketStorage.getCheckpoint();
 
-    // Baseline: full checksum with no compacted_state
+    // Baseline: V3 computes the full checksum directly from bucket_data.
     const full = (await bucketStorage.getChecksums(checkpoint, [request])).get(bucket)!;
 
-    // Set compacted_state.op_id = 3 to create a partial range starting after op 3.
-    // The doc has min_op=1, _id.o=6 so is_fully_included=false for the range (3, 6].
+    // V3 does not use bucket_state checksum pre-states.
     await db.bucketState(bucketStorage.replicationStreamId).updateOne(
       { _id: { d: definitionId, b: bucket } },
       {
         $set: {
           last_op: 3n,
-          compacted_state: { op_id: 3n, count: 0, checksum: 0n, bytes: null },
           estimate_since_compact: { count: 3, bytes: 100 }
         }
       },
@@ -164,12 +162,6 @@ describe('V3 checksums with S3 object storage', () => {
       minBucketChanges: 1,
       minChangeRatio: 0
     });
-
-    // Shift compacted_state.op_id back to before the CLEAR doc so getChecksums
-    // queries the pipeline (not just reads compacted_state directly).
-    await db
-      .bucketState(bucketStorage.replicationStreamId)
-      .updateOne({ _id: { d: definitionId, b: request.bucket } }, { $set: { 'compacted_state.op_id': 0n } });
 
     // Ground truth: sum of doc-level checksum fields
     const docs = await db

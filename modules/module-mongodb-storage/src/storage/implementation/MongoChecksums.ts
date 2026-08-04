@@ -124,12 +124,12 @@ export abstract class MongoChecksums {
   }
 
   /**
-   * Calculate (partial) checksums from bucket_state (pre-aggregated) and bucket_data (individual operations).
+   * Calculate (partial) checksums from an optional bucket_state pre-state and bucket_data (individual operations).
    *
    * Results are not cached here. This method is only called by {@link ChecksumCache.getChecksumMap},
    * which is responsible for caching its result.
    *
-   * As long as data is compacted regularly, this should be fast. Large buckets without pre-compacted bucket_state
+   * As long as data is compacted regularly, this should be fast. Large buckets without a pre-compacted bucket_state
    * can be slow.
    */
   private async computePartialChecksums(
@@ -242,10 +242,12 @@ export abstract class MongoChecksums {
     context: MongoChecksumSessionContext
   ): Promise<PartialChecksumMap>;
 
-  protected abstract fetchPreStates(
-    batch: FetchPartialBucketChecksum[],
-    context: MongoChecksumSessionContext
-  ): Promise<Map<string, { opId: InternalOpId; checksum: BucketChecksum }>>;
+  protected async fetchPreStates(
+    _batch: FetchPartialBucketChecksum[],
+    _context: MongoChecksumSessionContext
+  ): Promise<Map<string, { opId: InternalOpId; checksum: BucketChecksum }>> {
+    return new Map();
+  }
 }
 
 export function emptyChecksumForRequest(

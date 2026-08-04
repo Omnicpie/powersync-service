@@ -1,6 +1,6 @@
 import { mongo } from '@powersync/lib-service-mongodb';
 import { logger, ReplicationAssertionError, ServiceAssertionError } from '@powersync/lib-services-framework';
-import { addChecksums, InternalOpId, storage, utils } from '@powersync/service-core';
+import { addChecksums, InternalOpId, utils } from '@powersync/service-core';
 import { BucketDefinitionId } from '@powersync/service-sync-rules';
 import { BucketDataDoc } from '../common/BucketDataDoc.js';
 import { BucketDataKey, BucketStateDocumentBase } from '../models.js';
@@ -10,7 +10,6 @@ import { loadBucketDataDocument, maxOpId, serializeBucketData } from './bucket-f
 import { BucketDataContextV3 } from './BucketDataContextV3.js';
 import { DEFAULT_MAX_DOC_SIZE_BYTES } from './chunking.js';
 import { BucketDataDocumentV3, BucketStateDocumentV3 } from './models.js';
-import { DefinitionChecksumOperations, MongoChecksumsV3 } from './MongoChecksumsV3.js';
 import type { MongoSyncBucketStorageV3 } from './MongoSyncBucketStorageV3.js';
 import { BucketDataObjectStorage, hydrateBucketDataDocuments } from './object-storage/BucketDataObjectStorage.js';
 import { ObjectStorageLifecycle, PreparedObjectStorageUpload } from './object-storage/ObjectStorageLifecycle.js';
@@ -109,20 +108,12 @@ export class MongoCompactorV3 extends MongoCompactor {
       { d: new mongo.MinKey(), b: new mongo.MinKey() } as unknown as BucketStateDocumentV3['_id'],
       { d: new mongo.MaxKey(), b: new mongo.MaxKey() } as unknown as BucketStateDocumentV3['_id'],
       options,
-      (bucketState) => (bucketState as BucketStateDocumentV3)._id.d
-    );
-  }
-
-  public async dirtyBucketBatchForChecksums(options: { minBucketChanges: number }): Promise<DirtyBucket[]> {
-    if (options.minBucketChanges <= 0) {
-      throw new ReplicationAssertionError('minBucketChanges must be >= 1');
-    }
-    return this.dirtyBucketBatchForChecksumsForCollection(
-      this.db.bucketState(this.group_id) as unknown as mongo.Collection<BucketStateDocumentBase>,
-      {
-        'estimate_since_compact.count': { $gte: options.minBucketChanges }
-      } as unknown as mongo.Filter<BucketStateDocumentBase>,
-      (bucketState) => (bucketState as BucketStateDocumentV3)._id.d
+      {},
+      (bucketState) => ({
+        bucket: bucketState._id.b,
+        definitionId: (bucketState as BucketStateDocumentV3)._id.d,
+        estimatedCount: bucketState.estimate_since_compact?.count ?? 0
+      })
     );
   }
 
@@ -134,12 +125,29 @@ export class MongoCompactorV3 extends MongoCompactor {
       });
   }
 
-  /**
-   * The compactor operates on persisted definition ids only - never on parsed sources.
-   * This narrowed view makes the source-resolving checksum methods unreachable here.
-   */
-  private get definitionChecksums(): DefinitionChecksumOperations {
-    return this.storage.checksums as MongoChecksumsV3;
+  protected collectBucketStateUpdates(
+    state: CurrentBucketState,
+    _compactedOpId: InternalOpId
+  ): mongo.AnyBulkWriteOperation<mongo.Document> {
+    return {
+      updateOne: {
+        filter: this.bucketStateFilter(state.bucket, state.definitionId),
+        update: {
+          $set: {
+            estimate_since_compact: {
+              count: 0,
+              bytes: 0
+            }
+          },
+          // Remove any field written by an older implementation. V3 does not persist
+          // checksum pre-states in bucket_state.
+          $unset: {
+            compacted_state: 1
+          }
+        },
+        upsert: false
+      }
+    };
   }
 
   protected override async compactSingleBucket(bucket: string, definitionId: BucketDefinitionId | null = null) {
@@ -325,27 +333,7 @@ export class MongoCompactorV3 extends MongoCompactor {
     await this.flushBucketStateUpdates();
   }
 
-  protected async computeChecksumsForBuckets(
-    buckets: Pick<DirtyBucket, 'bucket' | 'definitionId'>[]
-  ): Promise<storage.PartialChecksumMap> {
-    return this.definitionChecksums.computePartialChecksumsDirectByDefinition(
-      buckets.map(({ bucket, definitionId }) => {
-        if (definitionId == null) {
-          throw new ServiceAssertionError(`Missing definitionId for bucket checksum update on bucket ${bucket}`);
-        }
-        return {
-          bucket,
-          definitionId,
-          end: this.maxOpId
-        };
-      })
-    );
-  }
-
-  protected bucketStateFilter(
-    bucket: string,
-    definitionId: BucketDefinitionId | null
-  ): mongo.Filter<BucketStateDocumentBase> {
+  protected bucketStateFilter(bucket: string, definitionId: BucketDefinitionId | null): mongo.Document {
     if (definitionId == null) {
       throw new ServiceAssertionError(`Missing definitionId for V3 bucket state filter on bucket ${bucket}`);
     }

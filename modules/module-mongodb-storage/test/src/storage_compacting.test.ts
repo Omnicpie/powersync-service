@@ -1,5 +1,6 @@
 import { BucketDataDoc } from '@module/storage/implementation/common/BucketDataDoc.js';
 import { MongoSyncBucketStorage } from '@module/storage/implementation/createMongoSyncBucketStorage.js';
+import { MongoCompactorV1 } from '@module/storage/implementation/v1/MongoCompactorV1.js';
 import { loadBucketDataDocument, serializeBucketData } from '@module/storage/implementation/v3/bucket-format.js';
 import { chunkBucketData, DEFAULT_MAX_DOC_SIZE_BYTES } from '@module/storage/implementation/v3/chunking.js';
 import { BucketDataDocumentV3 } from '@module/storage/implementation/v3/models.js';
@@ -193,12 +194,6 @@ bucket_definitions:
             b: 'global[]'
           },
           last_op: 5n,
-          compacted_state: {
-            op_id: 3n,
-            count: 3,
-            checksum: 0n,
-            bytes: 7n
-          },
           estimate_since_compact: {
             count: 2,
             bytes: 5n
@@ -229,27 +224,33 @@ bucket_definitions:
 
       const dirtyBuckets = compactor.dirtyBucketBatches({
         minBucketChanges: 1,
-        minChangeRatio: 0.39
+        minChangeRatio: storageDb.storageConfig.incrementalReprocessing ? 0 : 0.39
       });
       const firstBatch = await dirtyBuckets.next();
 
       expect(firstBatch.done).toBe(false);
       expect(firstBatch.value).toHaveLength(1);
       expect(firstBatch.value[0].bucket).toBe('global[]');
-      expect(firstBatch.value[0].estimatedCount).toBe(5);
+      expect(firstBatch.value[0].estimatedCount).toBe(storageDb.storageConfig.incrementalReprocessing ? 2 : 5);
       expect(typeof firstBatch.value[0].estimatedCount).toBe('number');
-      expect(firstBatch.value[0].dirtyRatio).toBeCloseTo(5 / 12);
+      if (storageDb.storageConfig.incrementalReprocessing) {
+        expect(firstBatch.value[0].dirtyRatio).toBeUndefined();
+      } else {
+        expect(firstBatch.value[0].dirtyRatio).toBeCloseTo(5 / 12);
+      }
 
-      const checksumBuckets = await compactor.dirtyBucketBatchForChecksums({
-        minBucketChanges: 1
-      });
-      expect(checksumBuckets).toEqual([
-        {
-          bucket: 'global[]',
-          definitionId: storageDb.storageConfig.incrementalReprocessing ? '1' : null,
-          estimatedCount: 5
-        }
-      ]);
+      if (!storageDb.storageConfig.incrementalReprocessing) {
+        const checksumBuckets = await (compactor as MongoCompactorV1).dirtyBucketBatchForChecksums({
+          minBucketChanges: 1
+        });
+        expect(checksumBuckets).toEqual([
+          {
+            bucket: 'global[]',
+            definitionId: null,
+            estimatedCount: 5
+          }
+        ]);
+      }
     });
   });
 });
@@ -1517,11 +1518,7 @@ bucket_definitions:
     expect(documents[0].ops!.map((op) => op.o)).toEqual([1n, 2n, 3n, 4n]);
 
     const state = await bucketStateCollection.findOne({ _id: { d: ctx.definitionId, b: BUCKET } });
-    expect(state?.compacted_state).toMatchObject({
-      op_id: 4n,
-      count: 4,
-      checksum: 70n
-    });
+    expect(state).not.toHaveProperty('compacted_state');
     expect(state?.estimate_since_compact).toEqual({ count: 0, bytes: 0 });
   });
 
@@ -2152,7 +2149,7 @@ bucket_definitions:
         _id: { d: ctx.definitionId, b: BUCKET }
       });
       expect(state).toBeDefined();
-      expect(state!.compacted_state).toBeUndefined();
+      expect(state).not.toHaveProperty('compacted_state');
 
       // The document ends beyond maxOpId, so it is not read or modified.
       const allOps = await readAllOps(collection);

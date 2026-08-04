@@ -1,9 +1,15 @@
 import { mongo } from '@powersync/lib-service-mongodb';
-import { ReplicationAssertionError } from '@powersync/lib-services-framework';
-import { addChecksums, CompactInitialReplicationResults, storage, utils } from '@powersync/service-core';
+import { ReplicationAssertionError, ServiceAssertionError } from '@powersync/lib-services-framework';
+import {
+  addChecksums,
+  CompactInitialReplicationResults,
+  isPartialChecksum,
+  storage,
+  utils
+} from '@powersync/service-core';
 import { BucketDefinitionId } from '@powersync/service-sync-rules';
 import { BucketDataDoc } from '../common/BucketDataDoc.js';
-import { BucketStateDocumentBase, LEGACY_BUCKET_DATA_DEFINITION_ID } from '../models.js';
+import { LEGACY_BUCKET_DATA_DEFINITION_ID } from '../models.js';
 import { CurrentBucketState, DirtyBucket, MongoCompactor } from '../MongoCompactor.js';
 import { cacheKey } from '../OperationBatch.js';
 import { BucketDataDocumentV1, BucketStateDocumentV1 } from './models.js';
@@ -35,7 +41,25 @@ export class MongoCompactorV1 extends MongoCompactor {
       { g: this.group_id, b: new mongo.MinKey() as any },
       { g: this.group_id, b: new mongo.MaxKey() as any },
       options,
-      () => null
+      { compacted_state: 1 },
+      (bucketState) => {
+        const updatedCount = bucketState.estimate_since_compact?.count ?? 0;
+        const totalCount = (bucketState.compacted_state?.count ?? 0) + updatedCount;
+        const updatedBytes = Number(bucketState.estimate_since_compact?.bytes ?? 0);
+        const totalBytes = Number(bucketState.compacted_state?.bytes ?? 0) + updatedBytes;
+        const dirtyChangeNumber = totalCount > 0 ? updatedCount / totalCount : 0;
+        const dirtyChangeBytes = totalBytes > 0 ? updatedBytes / totalBytes : 0;
+        const dirtyRatio = Math.max(dirtyChangeNumber, dirtyChangeBytes);
+        if (dirtyRatio < options.minChangeRatio) {
+          return null;
+        }
+        return {
+          bucket: bucketState._id.b,
+          definitionId: null,
+          estimatedCount: totalCount,
+          dirtyRatio
+        };
+      }
     );
   }
 
@@ -51,7 +75,10 @@ export class MongoCompactorV1 extends MongoCompactor {
         '_id.g': this.group_id,
         'estimate_since_compact.count': { $gte: options.minBucketChanges }
       },
-      () => null
+      () => null,
+      { compacted_state: 1 },
+      (bucketState) =>
+        Number(bucketState.estimate_since_compact!.count) + Number(bucketState.compacted_state?.count ?? 0)
     );
   }
 
@@ -97,6 +124,81 @@ export class MongoCompactorV1 extends MongoCompactor {
     );
   }
 
+  protected collectBucketStateUpdates(
+    state: CurrentBucketState,
+    compactedOpId: bigint
+  ): mongo.AnyBulkWriteOperation<mongo.Document> {
+    if (state.opCount < 0) {
+      throw new ServiceAssertionError(
+        `Invalid opCount: ${state.opCount} checksum ${state.checksum} opsSincePut: ${state.opsSincePut} maxOpId: ${this.maxOpId}`
+      );
+    }
+    return {
+      updateOne: {
+        filter: this.bucketStateFilter(state.bucket, state.definitionId),
+        update: {
+          $set: {
+            compacted_state: {
+              op_id: compactedOpId,
+              count: state.opCount,
+              checksum: BigInt(state.checksum),
+              bytes: state.opBytes
+            },
+            estimate_since_compact: {
+              // There could have been a whole bunch of new operations added to the bucket while compacting,
+              // which we don't currently cater for. We could potentially query for that, but that adds overhead.
+              count: 0,
+              bytes: 0
+            }
+          }
+        } satisfies mongo.UpdateFilter<BucketStateDocumentV1>,
+        // We generally expect this to have been created before.
+        // We don't create new ones here, to avoid issues with the unique index on bucket_updates.
+        upsert: false
+      }
+    };
+  }
+
+  protected async updateChecksumsBatch(buckets: Pick<DirtyBucket, 'bucket' | 'definitionId'>[]) {
+    const checksums = await this.computeChecksumsForBuckets(buckets);
+    const definitionIdByBucket = new Map(buckets.map((bucket) => [bucket.bucket, bucket.definitionId]));
+
+    for (const bucketChecksum of checksums.values()) {
+      if (isPartialChecksum(bucketChecksum)) {
+        // Should never happen since we don't specify `start`.
+        throw new ServiceAssertionError(`Full checksum expected, got ${JSON.stringify(bucketChecksum)}`);
+      }
+
+      this.bucketStateUpdates.push({
+        updateOne: {
+          filter: this.bucketStateFilter(
+            bucketChecksum.bucket,
+            definitionIdByBucket.get(bucketChecksum.bucket) ?? null
+          ),
+          update: {
+            $set: {
+              compacted_state: {
+                op_id: this.maxOpId,
+                count: bucketChecksum.count,
+                checksum: BigInt(bucketChecksum.checksum),
+                bytes: null
+              },
+              estimate_since_compact: {
+                count: 0,
+                bytes: 0
+              }
+            }
+          } satisfies mongo.UpdateFilter<BucketStateDocumentV1>,
+          // We don't create new ones here - it gets tricky to get the last_op right with the unique index on
+          // bucket_updates.
+          upsert: false
+        }
+      });
+    }
+
+    await this.flushBucketStateUpdates();
+  }
+
   protected async computeChecksumsForBuckets(
     buckets: Pick<DirtyBucket, 'bucket' | 'definitionId'>[]
   ): Promise<storage.PartialChecksumMap> {
@@ -109,10 +211,7 @@ export class MongoCompactorV1 extends MongoCompactor {
     );
   }
 
-  protected bucketStateFilter(
-    bucket: string,
-    _definitionId: BucketDefinitionId | null
-  ): mongo.Filter<BucketStateDocumentBase> {
+  protected bucketStateFilter(bucket: string, _definitionId: BucketDefinitionId | null): mongo.Document {
     return {
       _id: {
         g: this.group_id,

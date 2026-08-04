@@ -1,4 +1,4 @@
-import { SerializedSyncPlan } from '@powersync/service-core';
+import { InternalOpId, SerializedSyncPlan } from '@powersync/service-core';
 import * as bson from 'bson';
 import { BucketDataDoc } from '../common/BucketDataDoc.js';
 import {
@@ -103,6 +103,12 @@ export interface SyncRuleDocumentV1 extends SyncRuleDocumentBase, SyncRuleCheckp
 export interface BucketStateDocumentV1 extends BucketStateDocumentBase {
   _id: BucketStateDocumentBase['_id'] & {
     g: number;
+  };
+  compacted_state?: {
+    op_id: InternalOpId;
+    count: number;
+    checksum: bigint;
+    bytes: number | bigint | null;
   };
 }
 

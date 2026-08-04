@@ -2,10 +2,8 @@ import * as lib_mongo from '@powersync/lib-service-mongodb';
 import { ServiceAssertionError } from '@powersync/lib-services-framework';
 import {
   bson,
-  BucketChecksum,
   CheckpointChecksumInvalidatedError,
   FetchPartialBucketChecksum,
-  InternalOpId,
   isPartialChecksum,
   PartialChecksumMap,
   PartialOrFullChecksum,
@@ -80,59 +78,6 @@ export class MongoChecksumsV3 extends MongoChecksums implements DefinitionChecks
     return new Map<string, PartialOrFullChecksum>(
       batch.map((request) => [request.bucket, results.get(request.bucket) ?? emptyChecksumForRequest(request)])
     );
-  }
-
-  protected async fetchPreStates(
-    batch: FetchPartialBucketChecksum[],
-    context: MongoChecksumSessionContext
-  ): Promise<Map<string, { opId: InternalOpId; checksum: BucketChecksum }>> {
-    const normalizedBatch = batch.map((request) => ({
-      bucket: request.bucket,
-      definitionId: this.syncConfigMapping().bucketSourceId(request.source),
-      start: request.start,
-      end: request.end
-    }));
-
-    const preFilters = normalizedBatch
-      .filter((request) => request.start == null)
-      .map((request) => ({
-        _id: {
-          d: request.definitionId,
-          b: request.bucket
-        },
-        'compacted_state.op_id': { $exists: true, $lte: request.end }
-      }));
-
-    const preStates = new Map<string, { opId: InternalOpId; checksum: BucketChecksum }>();
-    if (preFilters.length == 0) {
-      return preStates;
-    }
-
-    const states = await this.db
-      .bucketState(this.group_id)
-      .find(
-        {
-          $or: preFilters
-        },
-        {
-          ...context.readOptions
-        }
-      )
-      .toArray();
-
-    for (const state of states) {
-      const compactedState = state.compacted_state!;
-      preStates.set(state._id.b, {
-        opId: compactedState.op_id,
-        checksum: {
-          bucket: state._id.b,
-          checksum: Number(compactedState.checksum),
-          count: compactedState.count
-        }
-      });
-    }
-
-    return preStates;
   }
 
   protected async computePartialChecksumsInternal(

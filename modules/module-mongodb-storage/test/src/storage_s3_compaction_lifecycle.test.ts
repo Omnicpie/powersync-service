@@ -351,11 +351,6 @@ describe('S3 compaction storage lifecycle', () => {
     const dataBefore = test_utils.getBatchData(batchBefore);
     expect(dataBefore).toHaveLength(4);
     const oldS3Paths = new Set(docsBefore.map((doc) => doc.storage_ref!.path));
-    const expectedCompactedOpId = docsBefore
-      .filter((doc) => doc._id.b === bucket && doc._id.o <= checkpoint.checkpoint)
-      .reduce<bigint | null>((highest, doc) => (highest == null || doc._id.o > highest ? doc._id.o : highest), null);
-    expect(expectedCompactedOpId).not.toBeNull();
-
     // Compact the bucket.
     await bucketStorage.compact({
       maxOpId: checkpoint.checkpoint,
@@ -368,19 +363,13 @@ describe('S3 compaction storage lifecycle', () => {
       minChangeRatio: 0
     });
 
-    // The compacted state reflects the hydrated object contents.
+    // V3 does not persist checksum pre-states in bucket_state.
     const bucketStateAfter = await bucketStateCollection.findOne({
       _id: { d: definitionId, b: bucket }
     });
     expect(bucketStateAfter).toBeDefined();
-    expect(bucketStateAfter!.compacted_state).toBeDefined();
-
-    expect(bucketStateAfter!.compacted_state!.checksum).not.toBe(0n);
-    expect(bucketStateAfter!.compacted_state!.count).toBe(4);
-
-    // Record the highest persisted document that was actually included in the
-    // compaction scan, rather than the requested upper bound.
-    expect(bucketStateAfter!.compacted_state!.op_id).toBe(expectedCompactedOpId);
+    expect(bucketStateAfter).not.toHaveProperty('compacted_state');
+    expect(bucketStateAfter!.estimate_since_compact).toEqual({ count: 0, bytes: 0 });
 
     // Compacted MongoDB documents remain metadata shells for object storage.
     const docsAfter = await collection.find({}).toArray();

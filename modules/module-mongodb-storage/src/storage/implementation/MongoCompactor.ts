@@ -1,13 +1,8 @@
 import * as timers from 'node:timers/promises';
 
 import { isMongoServerError, mongo, MONGO_OPERATION_TIMEOUT_MS } from '@powersync/lib-service-mongodb';
-import {
-  logger as defaultLogger,
-  Logger,
-  ReplicationAssertionError,
-  ServiceAssertionError
-} from '@powersync/lib-services-framework';
-import { InternalOpId, isPartialChecksum, storage } from '@powersync/service-core';
+import { logger as defaultLogger, Logger, ReplicationAssertionError } from '@powersync/lib-services-framework';
+import { InternalOpId, storage } from '@powersync/service-core';
 import { BucketDefinitionId } from '@powersync/service-sync-rules';
 
 import { BucketKey } from './common/BucketDataDoc.js';
@@ -86,7 +81,7 @@ export interface DirtyBucket {
 }
 
 export abstract class MongoCompactor {
-  protected bucketStateUpdates: mongo.AnyBulkWriteOperation<BucketStateDocumentBase>[] = [];
+  protected bucketStateUpdates: mongo.AnyBulkWriteOperation<mongo.Document>[] = [];
 
   protected readonly idLimitBytes: number;
   protected readonly moveBatchLimit: number;
@@ -175,9 +170,9 @@ export abstract class MongoCompactor {
     maxId: TCollectionBucketState['_id'],
     options: {
       minBucketChanges: number;
-      minChangeRatio: number;
     },
-    getDefinitionId: (state: TCollectionBucketState) => BucketDefinitionId | null
+    projection: mongo.Document,
+    mapBucket: (state: TCollectionBucketState) => DirtyBucket | null
   ): AsyncGenerator<DirtyBucket[]> {
     // Paginate through the bucket state collection using cursor-based scanning.
     while (true) {
@@ -213,7 +208,7 @@ export abstract class MongoCompactor {
                     $project: {
                       _id: 1,
                       estimate_since_compact: 1,
-                      compacted_state: 1
+                      ...projection
                     }
                   }
                 ],
@@ -232,40 +227,25 @@ export abstract class MongoCompactor {
       }
       lastId = cursor._id;
 
-      const mapped = (result?.buckets ?? []).map((bucketState) => {
-        // The numbers, specifically the bytes, could be a bigint. Convert to Number to allow calculating ratios.
-        // BigInt precision is not needed here since this is only an estimate.
-        const updatedCount = bucketState.estimate_since_compact?.count ?? 0;
-        const totalCount = (bucketState.compacted_state?.count ?? 0) + updatedCount;
-        const updatedBytes = Number(bucketState.estimate_since_compact?.bytes ?? 0);
-        const totalBytes = Number(bucketState.compacted_state?.bytes ?? 0) + updatedBytes;
-        const dirtyChangeNumber = totalCount > 0 ? updatedCount / totalCount : 0;
-        const dirtyChangeBytes = totalBytes > 0 ? updatedBytes / totalBytes : 0;
-        return {
-          bucket: bucketState._id.b,
-          definitionId: getDefinitionId(bucketState),
-          estimatedCount: totalCount,
-          dirtyRatio: Math.max(dirtyChangeNumber, dirtyChangeBytes)
-        };
-      });
+      const mapped = (result?.buckets ?? []).map(mapBucket).filter((bucket): bucket is DirtyBucket => bucket != null);
 
-      yield mapped.filter(
-        (bucket) => bucket.estimatedCount >= options.minBucketChanges && bucket.dirtyRatio >= options.minChangeRatio
-      );
+      yield mapped.filter((bucket) => bucket.estimatedCount >= options.minBucketChanges);
     }
   }
 
   protected async dirtyBucketBatchForChecksumsForCollection<TBucketState extends BucketStateDocumentBase>(
     collection: mongo.Collection<TBucketState>,
     filter: mongo.Filter<TBucketState>,
-    getDefinitionId: (state: mongo.WithId<TBucketState>) => BucketDefinitionId | null
+    getDefinitionId: (state: mongo.WithId<TBucketState>) => BucketDefinitionId | null,
+    projection: mongo.Document,
+    getEstimatedCount: (state: mongo.WithId<TBucketState>) => number
   ): Promise<DirtyBucket[]> {
     const dirtyBuckets = await collection
       .find(filter, {
         projection: {
           _id: 1,
           estimate_since_compact: 1,
-          compacted_state: 1
+          ...projection
         },
         sort: {
           'estimate_since_compact.count': -1
@@ -278,7 +258,7 @@ export abstract class MongoCompactor {
     return dirtyBuckets.map((bucket) => ({
       bucket: bucket._id.b,
       definitionId: getDefinitionId(bucket),
-      estimatedCount: Number(bucket.estimate_since_compact!.count) + Number(bucket.compacted_state?.count ?? 0)
+      estimatedCount: getEstimatedCount(bucket)
     }));
   }
 
@@ -286,8 +266,6 @@ export abstract class MongoCompactor {
     minBucketChanges: number;
     minChangeRatio: number;
   }): AsyncGenerator<DirtyBucket[]>;
-
-  public abstract dirtyBucketBatchForChecksums(options: { minBucketChanges: number }): Promise<DirtyBucket[]>;
 
   protected async compactDirtyBuckets() {
     for await (const buckets of this.dirtyBucketBatches({
@@ -352,40 +330,10 @@ export abstract class MongoCompactor {
 
   protected abstract compactSingleBucket(bucket: string, definitionId?: BucketDefinitionId | null): Promise<void>;
 
-  protected collectBucketStateUpdates(
+  protected abstract collectBucketStateUpdates(
     state: CurrentBucketState,
     compactedOpId: InternalOpId
-  ): mongo.AnyBulkWriteOperation<BucketStateDocumentBase> {
-    if (state.opCount < 0) {
-      throw new ServiceAssertionError(
-        `Invalid opCount: ${state.opCount} checksum ${state.checksum} opsSincePut: ${state.opsSincePut} maxOpId: ${this.maxOpId}`
-      );
-    }
-    return {
-      updateOne: {
-        filter: this.bucketStateFilter(state.bucket, state.definitionId),
-        update: {
-          $set: {
-            compacted_state: {
-              op_id: compactedOpId,
-              count: state.opCount,
-              checksum: BigInt(state.checksum),
-              bytes: state.opBytes
-            },
-            estimate_since_compact: {
-              // There could have been a whole bunch of new operations added to the bucket while compacting,
-              // which we don't currently cater for. We could potentially query for that, but that adds overhead.
-              count: 0,
-              bytes: 0
-            }
-          }
-        } satisfies mongo.UpdateFilter<BucketStateDocumentBase>,
-        // We generally expect this to have been created before.
-        // We don't create new ones here, to avoid issues with the unique index on bucket_updates.
-        upsert: false
-      }
-    };
-  }
+  ): mongo.AnyBulkWriteOperation<mongo.Document>;
 
   protected updateBucketChecksums(state: CurrentBucketState, compactedOpId: InternalOpId) {
     this.bucketStateUpdates.push(this.collectBucketStateUpdates(state, compactedOpId));
@@ -399,50 +347,7 @@ export abstract class MongoCompactor {
     }
   }
 
-  protected async updateChecksumsBatch(buckets: Pick<DirtyBucket, 'bucket' | 'definitionId'>[]) {
-    const checksums = await this.computeChecksumsForBuckets(buckets);
-    const definitionIdByBucket = new Map(buckets.map((bucket) => [bucket.bucket, bucket.definitionId]));
-
-    for (const bucketChecksum of checksums.values()) {
-      if (isPartialChecksum(bucketChecksum)) {
-        // Should never happen since we don't specify `start`.
-        throw new ServiceAssertionError(`Full checksum expected, got ${JSON.stringify(bucketChecksum)}`);
-      }
-
-      this.bucketStateUpdates.push({
-        updateOne: {
-          filter: this.bucketStateFilter(
-            bucketChecksum.bucket,
-            definitionIdByBucket.get(bucketChecksum.bucket) ?? null
-          ),
-          update: {
-            $set: {
-              compacted_state: {
-                op_id: this.maxOpId,
-                count: bucketChecksum.count,
-                checksum: BigInt(bucketChecksum.checksum),
-                bytes: null
-              },
-              estimate_since_compact: {
-                count: 0,
-                bytes: 0
-              }
-            }
-          } satisfies mongo.UpdateFilter<BucketStateDocumentBase>,
-          // We don't create new ones here - it gets tricky to get the last_op right with the unique index on
-          // bucket_updates.
-          upsert: false
-        }
-      });
-    }
-
-    await this.flushBucketStateUpdates();
-  }
-
   protected abstract writeBucketStateUpdates(): Promise<void>;
-  protected abstract computeChecksumsForBuckets(
-    buckets: Pick<DirtyBucket, 'bucket' | 'definitionId'>[]
-  ): Promise<storage.PartialChecksumMap>;
   protected abstract bucketStateFilter(bucket: string, definitionId: BucketDefinitionId | null): mongo.Document;
 }
 
