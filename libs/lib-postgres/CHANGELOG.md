@@ -1,5 +1,15 @@
 # @powersync/lib-service-postgres
 
+## 0.5.4
+
+### Patch Changes
+
+- 4e4063b: Optimize runtime type checks, closes https://github.com/powersync-ja/powersync-service/issues/771.
+- Updated dependencies [33a3c23]
+- Updated dependencies [4e4063b]
+- Updated dependencies [4037e8f]
+  - @powersync/service-types@0.18.0
+
 ## 0.5.3
 
 ### Patch Changes

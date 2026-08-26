@@ -1,5 +1,34 @@
 # @powersync/service-module-mongodb-storage
 
+## 0.21.0
+
+### Minor Changes
+
+- 332d649: [MongoDB Storage] Support incremental parameter compacting jobs.
+- 33a3c23: Add optional version_label for sync configs.
+- 2407f71: Apply timeouts and abortSignal handling to all S3 operations. The broad timeouts can be configured using the new `storage.object_storage.defaults_mode` option, or the `AWS_DEFAULTS_MODE` environment variable. Upgrade S3 SDK to fix further timeout issues.
+- a997c88: Restructure MongoDB V3 bucket compacting.
+
+### Patch Changes
+
+- e11c54b: Add S3 timing info for sync checkpoints.
+- aecf844: Persist subkey instead of re-computing every time.
+- cc121b3: [MongoDB Storage V3] Force create new replication stream when the old one is invalidated, and fix other consistency issues with V3 replication stream updates.
+- 4e4063b: Optimize runtime type checks, closes https://github.com/powersync-ja/powersync-service/issues/771.
+- 4037e8f: Add storage.default_storage_version config option.
+- Updated dependencies [e11c54b]
+- Updated dependencies [0077a8d]
+- Updated dependencies [332d649]
+- Updated dependencies [33a3c23]
+- Updated dependencies [cc121b3]
+- Updated dependencies [4e4063b]
+- Updated dependencies [2407f71]
+- Updated dependencies [10131ca]
+- Updated dependencies [4037e8f]
+- Updated dependencies [a997c88]
+  - @powersync/service-core@1.26.0
+  - @powersync/service-types@0.18.0
+
 ## 0.20.0
 
 ### Minor Changes

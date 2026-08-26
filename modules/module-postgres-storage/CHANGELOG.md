@@ -1,5 +1,31 @@
 # @powersync/service-module-postgres-storage
 
+## 0.19.0
+
+### Minor Changes
+
+- 33a3c23: Add optional version_label for sync configs.
+
+### Patch Changes
+
+- 332d649: [MongoDB Storage] Support incremental parameter compacting jobs.
+- 4e4063b: Optimize runtime type checks, closes https://github.com/powersync-ja/powersync-service/issues/771.
+- 4037e8f: Add storage.default_storage_version config option.
+- a997c88: Restructure MongoDB V3 bucket compacting.
+- Updated dependencies [e11c54b]
+- Updated dependencies [0077a8d]
+- Updated dependencies [332d649]
+- Updated dependencies [33a3c23]
+- Updated dependencies [cc121b3]
+- Updated dependencies [4e4063b]
+- Updated dependencies [2407f71]
+- Updated dependencies [10131ca]
+- Updated dependencies [4037e8f]
+- Updated dependencies [a997c88]
+  - @powersync/service-core@1.26.0
+  - @powersync/service-types@0.18.0
+  - @powersync/lib-service-postgres@0.5.4
+
 ## 0.18.0
 
 ### Minor Changes
