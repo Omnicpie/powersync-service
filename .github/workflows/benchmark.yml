@@ -35,7 +35,11 @@ jobs:
             }
             core.setOutput('tags-filter', (match[1] ?? '').trim());
 
-      - uses: actions/checkout@v5
+      - name: Checkout pull request
+        uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          persist-credentials: false
 
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
