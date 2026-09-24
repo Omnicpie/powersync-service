@@ -16,6 +16,8 @@ export interface MongoCompactOptions extends storage.CompactOptions {
    * the lightweight pass.
    */
   compactChunksOnly?: boolean;
+  /** Internal/testing use: bypass the new-chunk threshold during chunk-only compaction. */
+  forceChunkCompaction?: boolean;
 }
 
 const DEFAULT_CLEAR_BATCH_LIMIT = 5000;
@@ -98,6 +100,14 @@ export abstract class MongoCompactor {
       checkpoint_requested_at: { $exists: true, $lt: this.deleteCheckpointRequestsBefore },
       processed_at_lsn: { $ne: null }
     });
+    await this.deleteOldCustomCheckpointRequests();
+  }
+
+  protected async deleteOldCustomCheckpointRequests() {
+    if (this.deleteCheckpointRequestsBefore == null) {
+      return;
+    }
+
     await this.db.custom_write_checkpoints.deleteMany({
       checkpoint_requested_at: { $exists: true, $lt: this.deleteCheckpointRequestsBefore }
     });

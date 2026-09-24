@@ -3,4 +3,4 @@
 '@powersync/service-core': patch
 ---
 
-Add S3 timing info for sync checkpoints.
+Skip chunk-merge compact for small buckets after initial replication.

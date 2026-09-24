@@ -8,6 +8,7 @@ import { JSONBig } from '@powersync/service-jsonbig';
 import { mongoTableId, replicaIdToSubkey } from '../../../utils/util.js';
 import { currentBucketKey, MAX_ROW_SIZE } from '../MongoBucketBatchShared.js';
 import { MongoIdSequence } from '../MongoIdSequence.js';
+import { MongoWriteBatch } from '../MongoWriteBatch.js';
 import type { VersionedPowerSyncMongo } from '../db.js';
 import { TaggedBucketParameterDocument } from '../models.js';
 import { ObjectStorage } from '../v3/object-storage/ObjectStorage.js';
@@ -69,6 +70,7 @@ export interface PersistedBatchOptions {
    * Aborts in-flight object storage uploads when replication stops.
    */
   signal?: AbortSignal;
+  objectStorageUsageWriterId?: string;
 }
 
 /**
@@ -86,6 +88,7 @@ export abstract class PersistedBatch {
   protected readonly objectStorage?: ObjectStorage;
   protected readonly inlineThresholdBytes: number = DEFAULT_INLINE_THRESHOLD_BYTES;
   protected readonly signal?: AbortSignal;
+  protected readonly objectStorageUsageWriterId?: string;
 
   /**
    * For debug logging only.
@@ -108,6 +111,7 @@ export abstract class PersistedBatch {
     this.logger = options?.logger ?? defaultLogger;
     this.objectStorage = options?.objectStorage;
     this.signal = options?.signal;
+    this.objectStorageUsageWriterId = options?.objectStorageUsageWriterId;
     if (options?.inlineThresholdBytes != null) {
       this.inlineThresholdBytes = options.inlineThresholdBytes;
     }
@@ -213,13 +217,13 @@ export abstract class PersistedBatch {
 
   protected abstract get currentDataCount(): number;
 
-  protected abstract flushBucketData(session: mongo.ClientSession): Promise<void>;
+  protected abstract queueBucketData(writes: MongoWriteBatch): Promise<void>;
 
-  protected abstract flushBucketParameters(session: mongo.ClientSession): Promise<void>;
+  protected abstract queueBucketParameters(writes: MongoWriteBatch): void;
 
-  protected abstract flushCurrentData(session: mongo.ClientSession): Promise<void>;
+  protected abstract queueCurrentData(writes: MongoWriteBatch): void;
 
-  protected abstract flushBucketStates(session: mongo.ClientSession): Promise<void>;
+  protected abstract queueBucketStates(writes: MongoWriteBatch): void;
 
   protected abstract resetCurrentData(): void;
 
@@ -345,23 +349,26 @@ export abstract class PersistedBatch {
   async flush(session: mongo.ClientSession, options?: storage.BucketBatchCommitOptions) {
     const startAt = performance.now();
     let flushedSomething = false;
+    const writes = this.db.createWriteBatch(session, { ordered: false });
     if (this.bucketDataCount > 0) {
       flushedSomething = true;
-      await this.flushBucketData(session);
+      await this.queueBucketData(writes);
     }
     if (this.bucketParameters.length > 0) {
       flushedSomething = true;
-      await this.flushBucketParameters(session);
+      this.queueBucketParameters(writes);
     }
     if (this.currentDataCount > 0) {
       flushedSomething = true;
-      await this.flushCurrentData(session);
+      this.queueCurrentData(writes);
     }
 
     if (this.bucketStates.size > 0) {
       flushedSomething = true;
-      await this.flushBucketStates(session);
+      this.queueBucketStates(writes);
     }
+
+    await writes.execute();
 
     if (flushedSomething) {
       const duration = Math.round(performance.now() - startAt);

@@ -43,7 +43,8 @@ import { MongoCompactOptions, MongoCompactor } from './MongoCompactor.js';
 import { MongoParameterCompactor } from './MongoParameterCompactor.js';
 import { MongoParsedSyncConfigSet } from './MongoParsedSyncConfigSet.js';
 import { MongoPersistedReplicationStream } from './MongoPersistedReplicationStream.js';
-import { MongoWriteCheckpointAPI } from './MongoWriteCheckpointAPI.js';
+import { MongoSyncRulesLock } from './MongoSyncRulesLock.js';
+import { MongoCheckpointAPIOptions, MongoWriteCheckpointAPI } from './MongoWriteCheckpointAPI.js';
 import { ObjectStorage } from './v3/object-storage/ObjectStorage.js';
 
 export interface MongoSyncBucketStorageOptions {
@@ -109,6 +110,10 @@ export abstract class MongoSyncBucketStorage
   public readonly readPreference: mongo.ReadPreference | undefined;
   public readonly clearBatchThrottleRate: number;
   #storageInitialized = false;
+  /**
+   * Required for writing, optional for reading.
+   */
+  private readonly replicationLock: MongoSyncRulesLock | null;
 
   constructor(
     public readonly factory: MongoBucketStorage,
@@ -119,6 +124,7 @@ export abstract class MongoSyncBucketStorage
     options: MongoSyncBucketStorageOptions
   ) {
     super();
+    this.replicationLock = replicationStream.current_lock;
     this.storageConfig = options.storageConfig;
     this.objectStorage = options.objectStorage;
     // Keep small chunks inline in MongoDB rather than offloading them to S3.
@@ -128,10 +134,10 @@ export abstract class MongoSyncBucketStorage
     this.clearBatchThrottleRate = options.clearBatchThrottleRate ?? DEFAULT_CLEAR_BATCH_THROTTLE_RATE;
     this.db = factory.db.versioned(this.storageConfig);
     this.checksums = this.createMongoChecksums(options);
-    this.writeCheckpointAPI = new MongoWriteCheckpointAPI({
+    this.writeCheckpointAPI = this.createWriteCheckpointAPI({
       db: this.db,
-      mode: writeCheckpointMode ?? storage.WriteCheckpointMode.MANAGED,
-      sync_rules_id: replicationStreamId
+      writeCheckpointMode: { mode: writeCheckpointMode ?? storage.WriteCheckpointMode.MANAGED },
+      replicationStreamId
     });
 
     // Include both replication stream name and sync config version labels in log prefix.
@@ -159,6 +165,10 @@ export abstract class MongoSyncBucketStorage
   abstract createMongoCompactor(options: MongoCompactOptions): MongoCompactor;
 
   protected abstract createMongoChecksums(options: MongoSyncBucketStorageOptions): MongoChecksums;
+  protected createWriteCheckpointAPI(options: MongoCheckpointAPIOptions): MongoWriteCheckpointAPI {
+    return new MongoWriteCheckpointAPI(options);
+  }
+
   protected abstract createMongoParameterCompactor(
     checkpoint: InternalOpId,
     options: storage.CompactOptions
@@ -180,8 +190,8 @@ export abstract class MongoSyncBucketStorage
     return this.replicationStream.storageIds;
   }
 
-  setWriteCheckpointMode(mode: storage.WriteCheckpointMode): void {
-    this.writeCheckpointAPI.setWriteCheckpointMode(mode);
+  setWriteCheckpointMode(config: storage.WriteCheckpointModeConfig): void {
+    this.writeCheckpointAPI.setWriteCheckpointMode(config);
   }
 
   createManagedWriteCheckpoints(
@@ -265,12 +275,15 @@ export abstract class MongoSyncBucketStorage
    * The version-independent part of the batch options.
    */
   protected writerBatchOptions(options: storage.CreateWriterOptions): Omit<MongoBucketBatchOptions, 'resumeFromLsn'> {
+    const replicationLock = this.requireReplicationLock();
     return {
       logger: options.logger ?? this.logger,
       db: this.db,
       parsedSyncConfig: this.getParsedSyncConfigSet(options),
       replicationStreamId: this.replicationStreamId,
       replicationStreamName: this.replicationStreamName,
+      replicationLock,
+      opIdAllocator: this.factory.getOpIdAllocator(this.replicationStream, replicationLock),
       storeCurrentData: options.storeCurrentData,
       skipExistingRows: options.skipExistingRows ?? false,
       markRecordUnavailable: options.markRecordUnavailable,
@@ -282,7 +295,16 @@ export abstract class MongoSyncBucketStorage
     };
   }
 
+  private requireReplicationLock(): MongoSyncRulesLock {
+    if (this.replicationLock == null) {
+      throw new ServiceAssertionError('A replication lease is required to create a writer');
+    }
+    this.replicationLock.throwIfAborted();
+    return this.replicationLock;
+  }
+
   async createWriter(options: storage.CreateWriterOptions): Promise<storage.BucketStorageBatch> {
+    this.requireReplicationLock();
     await this.initializeStorage();
 
     const writer = await this.createWriterImpl(options);
@@ -371,6 +393,7 @@ export abstract class MongoSyncBucketStorage
   protected abstract clearBucketState(signal?: AbortSignal): Promise<void>;
 
   protected abstract clearSourceTables(signal?: AbortSignal): Promise<void>;
+  protected async clearCustomCheckpointRequests(_signal?: AbortSignal): Promise<void> {}
   protected abstract clearSyncRuleState(): Promise<void>;
 
   async clear(options?: storage.ClearStorageOptions): Promise<void> {
@@ -380,6 +403,7 @@ export abstract class MongoSyncBucketStorage
       throw new ReplicationAbortedError('Aborted clearing data', signal.reason);
     }
 
+    this.factory.discardOpIdAllocator(this.replicationStreamId);
     await this.clearSyncRuleState();
 
     await this.clearBucketData(signal);
@@ -387,6 +411,7 @@ export abstract class MongoSyncBucketStorage
     await this.clearSourceRecords(signal);
     await this.clearBucketState(signal);
     await this.clearSourceTables(signal);
+    await this.clearCustomCheckpointRequests(signal);
 
     this.#storageInitialized = false;
   }

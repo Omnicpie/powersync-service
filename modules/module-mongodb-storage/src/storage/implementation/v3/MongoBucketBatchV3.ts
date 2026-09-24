@@ -1,21 +1,23 @@
 import * as lib_mongo from '@powersync/lib-service-mongodb';
-import { ReplicationAssertionError } from '@powersync/lib-services-framework';
-import { storage } from '@powersync/service-core';
+import { ReplicationAssertionError, ServiceAssertionError } from '@powersync/lib-services-framework';
+import { InternalOpId, storage } from '@powersync/service-core';
+import { EventDefinitionId } from '@powersync/service-sync-rules';
 import * as bson from 'bson';
 import { mongoTableId } from '../../../utils/util.js';
 import { canCheckpointState } from '../CheckpointState.js';
 import { MongoBucketBatch, MongoBucketBatchOptions } from '../MongoBucketBatch.js';
 import { MongoParsedSyncConfigSet } from '../MongoParsedSyncConfigSet.js';
+import { MongoWriteBatch } from '../MongoWriteBatch.js';
 import { stopReplicationStreamPipeline } from '../SyncRuleStateUpdate.js';
 import { PersistedBatch } from '../common/PersistedBatch.js';
 import { SourceRecordStore } from '../common/SourceRecordStore.js';
+import { SyncRuleDocumentBase } from '../models.js';
 import { PersistedBatchV3 } from './PersistedBatchV3.js';
 import { SourceRecordStoreV3 } from './SourceRecordStoreV3.js';
 import { VersionedPowerSyncMongoV3 } from './VersionedPowerSyncMongoV3.js';
-import { ReplicationStreamDocumentV3, SourceTableDocumentV3 } from './models.js';
+import { CustomCheckpointRequestDocumentV3, ReplicationStreamDocumentV3, SourceTableDocumentV3 } from './models.js';
 import {
   createNewSourceTable,
-  designateEventCarrier,
   overlappingSourceTableFilter,
   planSourceTableReconciliation,
   sourceTableDesiredResolution,
@@ -27,6 +29,10 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
   declare readonly db: VersionedPowerSyncMongoV3;
 
   private readonly store: SourceRecordStore;
+  /** Avoid repeating idempotent createIndexes calls for every checkpoint flush. */
+  private readonly initializedCustomCheckpointEventIds = new Set<EventDefinitionId>();
+  // Used only to validate supplied checkpoint ids; it does not initialize collections.
+  private readonly knownEventIds: ReadonlySet<EventDefinitionId>;
   private readonly syncConfigIds: bson.ObjectId[];
   private needsActivationV3 = true;
   private lastWaitingLogThrottledV3 = 0;
@@ -38,6 +44,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
       throw new ReplicationAssertionError('Missing sync config id for v3 batch');
     }
     this.syncConfigIds = syncConfigIds;
+    this.knownEventIds = new Set(this.mapping.allEventDefinitionIds());
     this.store = new SourceRecordStoreV3(this.db, this.replicationStreamId, this.mapping);
   }
 
@@ -46,7 +53,8 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
       logger: this.logger,
       objectStorage: this.options.objectStorage,
       inlineThresholdBytes: this.options.inlineThresholdBytes,
-      signal: this.options.signal
+      signal: this.options.signal,
+      objectStorageUsageWriterId: this.objectStorageUsageWriterId
     });
   }
 
@@ -54,14 +62,16 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     return this.store;
   }
 
-  protected override async onReplicationTransactionFlush(
-    session: lib_mongo.mongo.ClientSession,
-    lastOp: bigint
-  ): Promise<void> {
+  protected override persistedOpHead(stream: SyncRuleDocumentBase): InternalOpId {
+    return (stream as ReplicationStreamDocumentV3).last_persisted_op ?? 0n;
+  }
+
+  protected override onReplicationTransactionFlush(writes: MongoWriteBatch, lastOp: InternalOpId): void {
     // Durably advance the stream-level head of persisted ops within the flush transaction.
     // This ensures a checkpoint created later (even by an empty commit, or by a freshly-appended
     // config that replicates nothing) covers all ops persisted before a potential crash.
-    await this.db.sync_rules.updateOne(
+    writes.updateOne(
+      this.db.sync_rules,
       {
         _id: this.replicationStreamId
       },
@@ -69,8 +79,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         $max: {
           last_persisted_op: lastOp
         }
-      },
-      { session }
+      }
     );
   }
 
@@ -91,7 +100,8 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         this.syncConfigIds.map((id) => id.toHexString()),
         table.ref,
         bucketDataSourceIds,
-        parameterLookupSourceIds
+        parameterLookupSourceIds,
+        [...table.eventDefinitionIds!]
       )
     );
   }
@@ -133,7 +143,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         .sourceRecords(this.replicationStreamId, mongoTableId(table.id))
         .drop()
         .catch((error) => {
-          if (lib_mongo.isMongoServerError(error) && error.codeName === 'NamespaceNotFound') {
+          if (lib_mongo.isMongoNamespaceNotFoundError(error)) {
             return;
           }
           throw error;
@@ -147,6 +157,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     const parsedOverride = options.parsedSyncConfig as MongoParsedSyncConfigSet | undefined;
     const syncConfig = parsedOverride?.hydratedSyncConfig ?? this.sync_rules;
     const mapping = parsedOverride?.mapping ?? this.mapping;
+    const eventById = (parsedOverride ?? this.options.parsedSyncConfig).eventById;
 
     const { connection_id, source } = options;
     const reconcile = options.reconcileSourceTables ?? storage.defaultSourceTableReconciler;
@@ -165,7 +176,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     const session = this.db.client.startSession();
     await using _ = { [Symbol.asyncDispose]: () => session.endSession() };
 
-    await session.withTransaction(async () => {
+    await this.withTransaction(async () => {
       const col = this.db.sourceTables(this.replicationStreamId);
 
       // Find records that overlap by name or relation id.
@@ -174,7 +185,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         .toArray();
 
       const candidateTables = candidateDocs.map((doc) =>
-        sourceTableFromDocument(doc, source.connectionTag, syncConfig, mapping)
+        sourceTableFromDocument(doc, source.connectionTag, syncConfig, mapping, eventById)
       );
       const candidates = candidateTables.map((table) => table.clone());
       const resolution = await reconcile({ source, candidates });
@@ -192,7 +203,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         storeCurrentData: source.sendsCompleteRows !== true,
         syncConfig,
         mapping,
-        desired: sourceTableDesiredResolution(syncConfig, source, mapping),
+        desired: sourceTableDesiredResolution(syncConfig, source, mapping, eventById),
         sourceCompatibleTables: resolution.compatibleTables,
         newTableSourceMetadata: resolution.newTableValues.sourceMetadata
       };
@@ -210,7 +221,8 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
           {
             $set: {
               bucket_data_source_ids: update.memberships.bucketDataSourceIds,
-              parameter_lookup_source_ids: update.memberships.parameterLookupSourceIds
+              parameter_lookup_source_ids: update.memberships.parameterLookupSourceIds,
+              event_definition_ids: update.memberships.eventDefinitionIds
             }
           },
           { session }
@@ -228,14 +240,13 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         plan.tables.push(table);
       }
 
-      // If memberships are split across multiple source tables, only one may fire events.
-      designateEventCarrier(plan.tables, context.desired.triggersEvent);
-
       result = {
         tables: plan.tables,
-        dropTables: plan.dropDocs.map((doc) => sourceTableFromDocument(doc, context.connectionTag, syncConfig, mapping))
+        dropTables: plan.dropDocs.map((doc) =>
+          sourceTableFromDocument(doc, context.connectionTag, syncConfig, mapping, eventById)
+        )
       };
-    });
+    }, session);
 
     return result!;
   }
@@ -248,167 +259,155 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
       return null;
     }
 
-    const refreshed = sourceTableFromDocument(doc, table.ref.connectionTag, this.sync_rules, this.mapping);
-    // The event-carrier designation is decided per resolveTables result and not persisted -
-    // preserve the caller's designation instead of recomputing it from the ref, so that
-    // refreshing a non-carrier table does not make it fire events.
-    refreshed.syncEvent = table.syncEvent;
-    return refreshed;
+    return sourceTableFromDocument(
+      doc,
+      table.ref.connectionTag,
+      this.sync_rules,
+      this.mapping,
+      this.options.parsedSyncConfig.eventById
+    );
   }
 
   async commit(lsn: string, options?: storage.BucketBatchCommitOptions): Promise<storage.CheckpointResult> {
     const { createEmptyCheckpoints } = { ...storage.DEFAULT_BUCKET_BATCH_COMMIT_OPTIONS, ...options };
 
-    await this.flush(options);
-
     using _ = this.tracer.span('storage', 'commit');
 
-    const now = new Date();
-
-    await this.db.write_checkpoints.updateMany(
-      {
-        processed_at_lsn: null,
-        'lsns.1': { $lte: lsn }
-      },
-      {
-        $set: {
-          processed_at_lsn: lsn
-        }
-      },
-      {
-        session: this.session
-      }
-    );
-
-    const preUpdateDocument = (await this.db.sync_rules.findOne(
-      {
-        _id: this.replicationStreamId,
-        'sync_configs._id': { $in: this.syncConfigIds }
-      },
-      {
-        session: this.session,
-        projection: {
-          sync_configs: 1,
-          last_persisted_op: 1
-        }
-      }
-    )) as ReplicationStreamDocumentV3 | null;
-
-    const states =
-      preUpdateDocument?.sync_configs?.filter((config) => this.syncConfigIds.some((id) => id.equals(config._id))) ?? [];
-    if (states.length == 0) {
-      throw new ReplicationAssertionError(
-        `Failed to update checkpoint - no matching sync_config for _id: ${this.replicationStreamId}/${this.syncConfigIds
-          .map((id) => id.toHexString())
-          .join(',')}`
+    const checkpoint = async (stream: SyncRuleDocumentBase, lastOp?: InternalOpId) => {
+      const now = new Date();
+      const preUpdateDocument = stream as ReplicationStreamDocumentV3;
+      const writes = this.db.createWriteBatch(this.session, { ordered: false });
+      writes.updateMany(
+        this.db.write_checkpoints,
+        { processed_at_lsn: null, 'lsns.1': { $lte: lsn } },
+        { $set: { processed_at_lsn: lsn } }
       );
-    }
-    // The replication job / MongoBucketBatch must be constructed with all replicating (PROCESSING / ACTIVE)
-    // sync configs in the stream, otherwise we'll get inconsistencies. Configs in other states (e.g. STOP)
-    // remain embedded in the document and are ignored here.
-    const missingSyncConfig = preUpdateDocument!.sync_configs.find(
-      (config) =>
-        [storage.SyncRuleState.PROCESSING, storage.SyncRuleState.ACTIVE].includes(config.state) &&
-        !this.syncConfigIds.some((id) => id.equals(config._id))
-    );
-    if (missingSyncConfig != null) {
-      throw new ReplicationAssertionError(`Replication job not configured for sync config ${missingSyncConfig._id}`);
-    }
 
-    // Effective head of the stream's op sequence.
-    // last_persisted_op is $max-advanced durably in the same transaction as every flush, and this
-    // read uses the same session, so it covers all ops persisted by this batch.
-    const newCheckpoint =
-      preUpdateDocument?.last_persisted_op == null ? 0n : BigInt(preUpdateDocument.last_persisted_op);
-
-    let checkpointBlocked = false;
-    let checkpointCreated = false;
-    let checkpointLogState: unknown = null;
-    const unblockedConfigIds: bson.ObjectId[] = [];
-
-    for (const state of states) {
-      if (state.last_checkpoint != null && state.last_checkpoint > newCheckpoint) {
-        // last_persisted_op is $max-advanced durably in the same transaction as every flush, and
-        // checkpoints are only ever created at that head, so a checkpoint past the head means the
-        // op sequence or the stored state is corrupt.
+      const states =
+        preUpdateDocument?.sync_configs?.filter((config) => this.syncConfigIds.some((id) => id.equals(config._id))) ??
+        [];
+      if (states.length == 0) {
         throw new ReplicationAssertionError(
-          `Invariant violation: sync config ${state._id} has last_checkpoint ${state.last_checkpoint} > stream head ${newCheckpoint}`
+          `Failed to update checkpoint - no matching sync_config for _id: ${this.replicationStreamId}/${this.syncConfigIds
+            .map((id) => id.toHexString())
+            .join(',')}`
+        );
+      }
+      // The replication job / MongoBucketBatch must be constructed with all replicating (PROCESSING / ACTIVE)
+      // sync configs in the stream, otherwise we'll get inconsistencies. Configs in other states (e.g. STOP)
+      // remain embedded in the document and are ignored here.
+      const missingSyncConfig = preUpdateDocument!.sync_configs.find(
+        (config) =>
+          [storage.SyncRuleState.PROCESSING, storage.SyncRuleState.ACTIVE].includes(config.state) &&
+          !this.syncConfigIds.some((id) => id.equals(config._id))
+      );
+      if (missingSyncConfig != null) {
+        throw new ReplicationAssertionError(`Replication job not configured for sync config ${missingSyncConfig._id}`);
+      }
+
+      // Effective head of the stream's op sequence.
+      // A combined flush supplies its new head; an empty commit uses the fenced persisted head.
+      const newCheckpoint = lastOp ?? this.persistedOpHead(preUpdateDocument);
+
+      let checkpointBlocked = false;
+      let checkpointCreated = false;
+      let checkpointLogState: unknown = null;
+      const unblockedConfigIds: bson.ObjectId[] = [];
+
+      for (const state of states) {
+        if (state.last_checkpoint != null && state.last_checkpoint > newCheckpoint) {
+          // last_persisted_op is $max-advanced durably in the same transaction as every flush, and
+          // checkpoints are only ever created at that head, so a checkpoint past the head means the
+          // op sequence or the stored state is corrupt.
+          throw new ReplicationAssertionError(
+            `Invariant violation: sync config ${state._id} has last_checkpoint ${state.last_checkpoint} > stream head ${newCheckpoint}`
+          );
+        }
+
+        const canCheckpoint = canCheckpointState(lsn, {
+          snapshotDone: state.snapshot_done === true,
+          lastCheckpointLsn: state.last_checkpoint_lsn,
+          noCheckpointBefore: state.no_checkpoint_before
+        });
+
+        if (!canCheckpoint) {
+          checkpointBlocked = true;
+          // Log the first blocked config's state.
+          checkpointLogState ??= {
+            snapshot_done: state.snapshot_done,
+            last_checkpoint_lsn: state.last_checkpoint_lsn,
+            no_checkpoint_before: state.no_checkpoint_before
+          };
+          continue;
+        }
+
+        checkpointCreated ||= createEmptyCheckpoints || state.last_checkpoint !== newCheckpoint;
+        unblockedConfigIds.push(state._id);
+      }
+
+      // Every commit advances the stream's resume position: commit() flushes first, so all
+      // source changes up to this lsn have been persisted, even when checkpoints are blocked.
+      // In the future we could also advance this on flush, when the connector provides the
+      // current position (see setResumeLsn, which connectors may already call after flushing).
+      const resumeLsnUpdate = {
+        resume_lsn: lsn,
+        ...(lastOp == null ? {} : { last_persisted_op: lastOp })
+      };
+
+      if (unblockedConfigIds.length > 0) {
+        // All unblocked configs get the SAME new value, so we apply it with a single updateOne
+        // (single-document atomicity).
+        const updateSet: Record<string, any> = {
+          last_fatal_error: null,
+          last_fatal_error_ts: null
+        };
+        // Only advance checkpoint fields when an actual (non-empty) checkpoint is created, matching
+        // the previous per-config / v1 behaviour.
+        if (checkpointCreated) {
+          updateSet['sync_configs.$[config].last_checkpoint'] = newCheckpoint;
+          updateSet['sync_configs.$[config].last_checkpoint_lsn'] = lsn;
+          updateSet['last_checkpoint_ts'] = now;
+        }
+
+        writes.updateOne(
+          this.db.sync_rules,
+          {
+            _id: this.replicationStreamId,
+            'sync_configs._id': { $in: unblockedConfigIds }
+          },
+          { $set: updateSet, $max: resumeLsnUpdate },
+          {
+            arrayFilters: checkpointCreated ? [{ 'config._id': { $in: unblockedConfigIds } }] : undefined
+          }
+        );
+      } else {
+        // All selected configs are blocked - only update keepalive/error tracking and the
+        // resume position.
+        writes.updateOne(
+          this.db.sync_rules,
+          {
+            _id: this.replicationStreamId
+          },
+          {
+            $set: {
+              last_fatal_error: null,
+              last_fatal_error_ts: null
+            },
+            $max: resumeLsnUpdate
+          }
         );
       }
 
-      const canCheckpoint = canCheckpointState(lsn, {
-        snapshotDone: state.snapshot_done === true,
-        lastCheckpointLsn: state.last_checkpoint_lsn,
-        noCheckpointBefore: state.no_checkpoint_before
-      });
-
-      if (!canCheckpoint) {
-        checkpointBlocked = true;
-        // Log the first blocked config's state.
-        checkpointLogState ??= {
-          snapshot_done: state.snapshot_done,
-          last_checkpoint_lsn: state.last_checkpoint_lsn,
-          no_checkpoint_before: state.no_checkpoint_before
-        };
-        continue;
-      }
-
-      checkpointCreated ||= createEmptyCheckpoints || state.last_checkpoint !== newCheckpoint;
-      unblockedConfigIds.push(state._id);
-    }
-
-    // Every commit advances the stream's resume position: commit() flushes first, so all
-    // source changes up to this lsn have been persisted, even when checkpoints are blocked.
-    // In the future we could also advance this on flush, when the connector provides the
-    // current position (see setResumeLsn, which connectors may already call after flushing).
-    const resumeLsnUpdate = { resume_lsn: lsn };
-
-    if (unblockedConfigIds.length > 0) {
-      // All unblocked configs get the SAME new value, so we apply it with a single updateOne
-      // (single-document atomicity).
-      const updateSet: Record<string, any> = {
-        last_keepalive_ts: now,
-        last_fatal_error: null,
-        last_fatal_error_ts: null
-      };
-      // Only advance checkpoint fields when an actual (non-empty) checkpoint is created, matching
-      // the previous per-config / v1 behaviour.
-      if (checkpointCreated) {
-        updateSet['sync_configs.$[config].last_checkpoint'] = newCheckpoint;
-        updateSet['sync_configs.$[config].last_checkpoint_lsn'] = lsn;
-        updateSet['last_checkpoint_ts'] = now;
-      }
-
-      await this.db.sync_rules.updateOne(
-        {
-          _id: this.replicationStreamId,
-          'sync_configs._id': { $in: unblockedConfigIds }
-        },
-        { $set: updateSet, $max: resumeLsnUpdate },
-        {
-          session: this.session,
-          arrayFilters: checkpointCreated ? [{ 'config._id': { $in: unblockedConfigIds } }] : undefined
-        }
-      );
-    } else {
-      // All selected configs are blocked - only update keepalive/error tracking and the
-      // resume position.
-      await this.db.sync_rules.updateOne(
-        {
-          _id: this.replicationStreamId
-        },
-        {
-          $set: {
-            last_keepalive_ts: now,
-            last_fatal_error: null,
-            last_fatal_error_ts: null
-          },
-          $max: resumeLsnUpdate
-        },
-        { session: this.session }
-      );
-    }
-
+      await writes.execute();
+      return { checkpointBlocked, checkpointCreated, checkpointLogState, newCheckpoint };
+    };
+    const projection = { sync_configs: 1, last_persisted_op: 1 };
+    const { checkpointBlocked, checkpointCreated, checkpointLogState, newCheckpoint } = await this.flushAndCommit(
+      checkpoint,
+      () => this.withFencedTransaction(() => this.fence(this.session, projection), checkpoint),
+      options,
+      projection
+    );
     if (checkpointBlocked) {
       if (Date.now() - this.lastWaitingLogThrottledV3 > 5_000) {
         this.logger.info(
@@ -439,23 +438,9 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
 
   async setResumeLsn(lsn: string): Promise<void> {
     using _ = this.tracer.span('storage', 'set_resume_lsn');
-    await this.db.sync_rules.updateOne(
-      {
-        _id: this.replicationStreamId
-      },
-      {
-        $set: {
-          resume_lsn: lsn
-        }
-      },
-      {
-        session: this.session,
-        // Losing occasional resume LSN is fine. That may mean reprocessing
-        // some source changes in some edge cases, which is not an issue since
-        // changes are processed in an idempotent way.
-        writeConcern: { w: 1 }
-      }
-    );
+    // Losing occasional resume LSN would only reprocess source changes.
+    // Keep the lease check atomic, but do not wait for majority replication of this resume hint.
+    await this.updateStreamMetadata({ resume_lsn: { $literal: lsn } }, {}, { w: 1 });
   }
 
   private async autoActivateV3(lsn: string): Promise<void> {
@@ -466,7 +451,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     const session = this.session;
     let activated = false;
     let needsFutureActivationCheck = true;
-    await session.withTransaction(async () => {
+    await this.withTransaction(async () => {
       // Reset on transaction retries.
       needsFutureActivationCheck = true;
       activated = false;
@@ -554,7 +539,7 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
       } else if (doc.state == storage.SyncRuleState.ACTIVE && processingStates.length == 0) {
         needsFutureActivationCheck = false;
       }
-    });
+    }, session);
     if (activated) {
       this.logger.info(`Activated new replication stream at ${lsn}`);
       await this.db.notifyCheckpoint();
@@ -564,26 +549,35 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     }
   }
 
-  async markAllSnapshotDone(no_checkpoint_before_lsn: string): Promise<void> {
-    await this.db.sync_rules.updateOne(
-      {
-        _id: this.replicationStreamId,
-        'sync_configs._id': { $in: this.syncConfigIds }
-      },
-      {
-        $set: {
-          'sync_configs.$[config].snapshot_done': true,
-          last_keepalive_ts: new Date()
-        },
-        $max: {
-          'sync_configs.$[config].no_checkpoint_before': no_checkpoint_before_lsn
+  private syncConfigMetadataUpdate(syncConfigIds: bson.ObjectId[], set: lib_mongo.mongo.Document) {
+    return {
+      sync_configs: {
+        $map: {
+          input: '$sync_configs',
+          as: 'config',
+          in: {
+            $cond: [
+              { $in: ['$$config._id', { $literal: syncConfigIds }] },
+              { $mergeObjects: ['$$config', set] },
+              '$$config'
+            ]
+          }
         }
-      },
-      {
-        session: this.session,
-        arrayFilters: [{ 'config._id': { $in: this.syncConfigIds } }]
       }
-    );
+    };
+  }
+
+  private snapshotDoneUpdate(no_checkpoint_before_lsn: string) {
+    return this.syncConfigMetadataUpdate(this.syncConfigIds, {
+      snapshot_done: true,
+      no_checkpoint_before: { $max: ['$$config.no_checkpoint_before', { $literal: no_checkpoint_before_lsn }] }
+    });
+  }
+
+  async markAllSnapshotDone(no_checkpoint_before_lsn: string): Promise<void> {
+    await this.updateStreamMetadata(this.snapshotDoneUpdate(no_checkpoint_before_lsn), {
+      'sync_configs._id': { $in: this.syncConfigIds }
+    });
   }
 
   async markSnapshotDone(no_checkpoint_before_lsn: string, options?: { throwOnConflict?: boolean }): Promise<void> {
@@ -607,7 +601,9 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
         }
       }
 
-      await this.markAllSnapshotDone(no_checkpoint_before_lsn);
+      await this.updateStreamMetadataInTransaction(this.snapshotDoneUpdate(no_checkpoint_before_lsn), {
+        'sync_configs._id': { $in: this.syncConfigIds }
+      });
     });
   }
 
@@ -616,22 +612,9 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     if (syncConfigIds.length == 0) {
       return;
     }
-
-    await this.db.sync_rules.updateOne(
-      {
-        _id: this.replicationStreamId,
-        'sync_configs._id': { $in: syncConfigIds }
-      },
-      {
-        $set: {
-          'sync_configs.$[config].snapshot_done': false
-        }
-      },
-      {
-        session: this.session,
-        arrayFilters: [{ 'config._id': { $in: syncConfigIds } }]
-      }
-    );
+    await this.updateStreamMetadata(this.syncConfigMetadataUpdate(syncConfigIds, { snapshot_done: false }), {
+      'sync_configs._id': { $in: syncConfigIds }
+    });
   }
 
   async markTableSnapshotDone(
@@ -643,7 +626,9 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
     const syncConfigIds = this.relevantSyncConfigIdsForTables(tables);
 
     await this.withTransaction(async () => {
-      await this.db.sourceTables(this.replicationStreamId).updateMany(
+      const writes = this.db.createWriteBatch(session, { ordered: false });
+      writes.updateMany(
+        this.db.sourceTables(this.replicationStreamId),
         { _id: { $in: ids } },
         {
           $set: {
@@ -652,36 +637,127 @@ export class MongoBucketBatchV3 extends MongoBucketBatch {
           $unset: {
             snapshot_status: 1
           }
-        },
-        { session }
+        }
       );
 
       if (no_checkpoint_before_lsn != null && syncConfigIds.length > 0) {
-        await this.db.sync_rules.updateOne(
+        writes.updateOne(
+          this.db.sync_rules,
           {
             _id: this.replicationStreamId,
             'sync_configs._id': { $in: syncConfigIds }
           },
           {
-            $set: {
-              last_keepalive_ts: new Date()
-            },
             $max: {
               'sync_configs.$[config].no_checkpoint_before': no_checkpoint_before_lsn
             }
           },
           {
-            session: this.session,
             // Only set for sync configs that use this table
             arrayFilters: [{ 'config._id': { $in: syncConfigIds } }]
           }
         );
       }
+      await writes.execute();
     });
     return tables.map((table) => {
       const copy = table.clone();
       copy.snapshotComplete = true;
       return copy;
     });
+  }
+
+  protected override async batchCreateCustomWriteCheckpoints(
+    session: lib_mongo.mongo.ClientSession,
+    opId: InternalOpId
+  ): Promise<void> {
+    if (this.write_checkpoint_batch.length == 0) {
+      return;
+    }
+
+    const checkpointsByEvent = Map.groupBy(this.write_checkpoint_batch, (checkpoint) =>
+      this.validateCustomCheckpointEventId(checkpoint.event_id)
+    );
+
+    const writes = this.db.createWriteBatch(session, { ordered: false });
+    for (const [eventId, checkpoints] of checkpointsByEvent) {
+      this.batchCreateEventCustomWriteCheckpoints(writes, opId, eventId, checkpoints);
+    }
+    await writes.execute();
+  }
+
+  protected override async prepareCustomWriteCheckpoints(): Promise<void> {
+    // Most events never produce custom checkpoints, so create collections lazily
+    // only for the event ids present in this batch. This hook runs before the
+    // replication transaction because MongoDB cannot create indexes within it.
+    const eventIds = new Set(
+      this.write_checkpoint_batch.map((checkpoint) => this.validateCustomCheckpointEventId(checkpoint.event_id))
+    );
+    for (const eventId of eventIds) {
+      if (this.initializedCustomCheckpointEventIds.has(eventId)) {
+        continue;
+      }
+      await this.db.initializeCustomCheckpointRequestsCollection({
+        replicationStreamId: this.replicationStreamId,
+        eventId
+      });
+      this.initializedCustomCheckpointEventIds.add(eventId);
+    }
+  }
+
+  private validateCustomCheckpointEventId(eventId: EventDefinitionId | undefined): EventDefinitionId {
+    if (eventId == null) {
+      throw new ServiceAssertionError('V3 custom checkpoints require an event definition id');
+    }
+
+    if (!this.knownEventIds.has(eventId)) {
+      throw new ServiceAssertionError(`Unknown custom checkpoint event definition ${eventId}`);
+    }
+    return eventId;
+  }
+
+  private batchCreateEventCustomWriteCheckpoints(
+    writes: MongoWriteBatch,
+    opId: InternalOpId,
+    eventId: EventDefinitionId,
+    checkpoints: storage.CustomWriteCheckpointOptions[]
+  ): void {
+    // A repeated user within an event replaces the complete checkpoint state.
+    const uniqueCheckpoints = new Map(checkpoints.map((checkpoint) => [checkpoint.user_id, checkpoint]));
+    writes.bulkWriteUnordered(
+      this.db.customCheckpointRequests({
+        eventId,
+        replicationStreamId: this.replicationStreamId
+      }),
+      [...uniqueCheckpoints.values()].map((checkpointOptions) => {
+        const set: Partial<CustomCheckpointRequestDocumentV3> = {
+          user_id: checkpointOptions.user_id,
+          checkpoint: checkpointOptions.checkpoint,
+          op_id: opId
+        };
+        if (checkpointOptions.checkpoint_requested_at != null) {
+          set.checkpoint_requested_at = checkpointOptions.checkpoint_requested_at;
+        }
+
+        return {
+          updateOne: {
+            filter: {
+              user_id: checkpointOptions.user_id
+            },
+            update: {
+              $set: set,
+              ...(checkpointOptions.checkpoint_requested_at == null
+                ? {
+                    $unset: {
+                      checkpoint_requested_at: 1
+                    }
+                  }
+                : {})
+            },
+            upsert: true
+          }
+        };
+      })
+    );
   }
 }

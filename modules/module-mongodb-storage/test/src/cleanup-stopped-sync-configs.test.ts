@@ -2,7 +2,7 @@ import { MongoSyncBucketStorageV3 } from '@module/storage/implementation/v3/Mong
 import { ObjectStorageLifecycle } from '@module/storage/implementation/v3/object-storage/ObjectStorageLifecycle.js';
 import { mongoTestStorageFactoryGenerator } from '@module/utils/test-utils.js';
 import { storage, updateSyncRulesFromYaml } from '@powersync/service-core';
-import { test_utils } from '@powersync/service-core-tests';
+import { getTestStorage, test_utils } from '@powersync/service-core-tests';
 import * as bson from 'bson';
 import { describe, expect, test } from 'vitest';
 import { VersionedPowerSyncMongoV3 } from '../../src/storage/implementation/v3/VersionedPowerSyncMongoV3.js';
@@ -78,7 +78,7 @@ streams:
         { storageVersion: 3 }
       )
     );
-    const firstStorage = factory.getInstance(first) as MongoSyncBucketStorageV3;
+    const firstStorage = (await getTestStorage(factory, first)) as MongoSyncBucketStorageV3;
     const db = firstStorage.db as VersionedPowerSyncMongoV3;
     await using firstWriter = await firstStorage.createWriter(test_utils.BATCH_OPTIONS);
 
@@ -155,7 +155,7 @@ streams:
     );
     expect(second.replicationStreamId).toBe(first.replicationStreamId);
     const replicatingStreams = await factory.getReplicatingReplicationStreams();
-    const secondStorage = factory.getInstance(replicatingStreams[0]) as MongoSyncBucketStorageV3;
+    const secondStorage = (await getTestStorage(factory, replicatingStreams[0])) as MongoSyncBucketStorageV3;
     await using secondWriter = await secondStorage.createWriter(test_utils.BATCH_OPTIONS);
     await secondWriter.markAllSnapshotDone('2/1');
     await secondWriter.commit('2/1');
@@ -218,7 +218,7 @@ streams:
         { storageVersion: 3 }
       )
     );
-    const firstStorage = factory.getInstance(first) as MongoSyncBucketStorageV3;
+    const firstStorage = (await getTestStorage(factory, first)) as MongoSyncBucketStorageV3;
     const db = firstStorage.db as VersionedPowerSyncMongoV3;
     await using firstWriter = await firstStorage.createWriter(test_utils.BATCH_OPTIONS);
     const resolved = await firstWriter.resolveTables({
@@ -266,7 +266,7 @@ streams:
     expect(secondDefinitionId).toBe(projectDefinitionId);
 
     const replicatingStreams = await factory.getReplicatingReplicationStreams();
-    const secondStorage = factory.getInstance(replicatingStreams[0]) as MongoSyncBucketStorageV3;
+    const secondStorage = (await getTestStorage(factory, replicatingStreams[0])) as MongoSyncBucketStorageV3;
     await using secondWriter = await secondStorage.createWriter(test_utils.BATCH_OPTIONS);
     await secondWriter.markAllSnapshotDone('2/1');
     await secondWriter.commit('2/1');
@@ -289,7 +289,10 @@ streams:
     expect(await collectionExists(db, ownerBucketDataCollection)).toBe(false);
     expect(await collectionExists(db, sourceRecordsCollection)).toBe(true);
 
-    const activeStorage = (await factory.getActiveSyncConfig())!.storage as MongoSyncBucketStorageV3;
+    const activeStorage = (await getTestStorage(
+      factory,
+      (await factory.getActiveSyncConfig())!.replicationStream
+    )) as MongoSyncBucketStorageV3;
     await using activeWriter = await activeStorage.createWriter(test_utils.BATCH_OPTIONS);
     const activeTable = (
       await activeWriter.resolveTables({
@@ -324,7 +327,7 @@ streams:
   test('drops current_data when a table becomes event-only but is kept by a live event', async () => {
     await using factory = await INITIALIZED_MONGO_STORAGE_FACTORY.factory();
 
-    // The first config syncs `todos` data and also fires events for it.
+    // The first config syncs `todos` data and also evaluates the audit event for its rows.
     const first = await factory.updateSyncRules(
       updateSyncRulesFromYaml(
         `
@@ -343,7 +346,7 @@ event_definitions:
         { storageVersion: 3 }
       )
     );
-    const firstStorage = factory.getInstance(first) as MongoSyncBucketStorageV3;
+    const firstStorage = (await getTestStorage(factory, first)) as MongoSyncBucketStorageV3;
     const db = firstStorage.db as VersionedPowerSyncMongoV3;
     await using firstWriter = await firstStorage.createWriter(test_utils.BATCH_OPTIONS);
     const resolved = await firstWriter.resolveTables({
@@ -360,15 +363,22 @@ event_definitions:
       },
       afterReplicaId: test_utils.rid('todo-1')
     });
+    const eventDefinitionId = [...resolved.tables[0].eventDefinitionIds!][0];
+    firstWriter.addCustomWriteCheckpoint({
+      user_id: 'user-1',
+      checkpoint: 1n,
+      event_id: eventDefinitionId
+    });
     await firstWriter.markAllSnapshotDone('1/1');
     await firstWriter.commit('1/1');
 
     const sourceTableId = resolved.tables[0].id as bson.ObjectId;
     const sourceRecordsCollection = db.sourceRecords(first.replicationStreamId, sourceTableId).collectionName;
     const ownerDefinitionId = first.syncConfigContent[0].mapping.allBucketDefinitionIds()[0];
-    expect(
-      (await db.sourceTables(first.replicationStreamId).findOne({ _id: sourceTableId }))?.bucket_data_source_ids
-    ).toEqual([ownerDefinitionId]);
+    const initialSourceTable = await db.sourceTables(first.replicationStreamId).findOne({ _id: sourceTableId });
+    expect(initialSourceTable?.bucket_data_source_ids).toEqual([ownerDefinitionId]);
+    expect(initialSourceTable?.event_definition_ids).toHaveLength(1);
+    const eventDefinitionIds = initialSourceTable!.event_definition_ids;
     // The prior snapshot is persisted in current_data.
     expect(await collectionExists(db, sourceRecordsCollection)).toBe(true);
 
@@ -395,7 +405,7 @@ event_definitions:
     expect(second.replicationStreamId).toBe(first.replicationStreamId);
 
     const replicatingStreams = await factory.getReplicatingReplicationStreams();
-    const secondStorage = factory.getInstance(replicatingStreams[0]) as MongoSyncBucketStorageV3;
+    const secondStorage = (await getTestStorage(factory, replicatingStreams[0])) as MongoSyncBucketStorageV3;
     await using secondWriter = await secondStorage.createWriter(test_utils.BATCH_OPTIONS);
     await secondWriter.markAllSnapshotDone('2/1');
     await secondWriter.commit('2/1');
@@ -414,13 +424,22 @@ event_definitions:
       sourceTablesDeleted: 0
     });
 
-    // The source table row survives (the live event still needs it), narrowed to empty
-    // memberships, but its now-unused current_data collection is dropped.
+    // The source table row survives (the live event still needs it), narrowed to empty data and
+    // parameter memberships, but its event membership remains and current_data is dropped.
     const sourceTable = await db.sourceTables(first.replicationStreamId).findOne({ _id: sourceTableId });
     expect(sourceTable).not.toBeNull();
     expect(sourceTable?.bucket_data_source_ids).toEqual([]);
     expect(sourceTable?.parameter_lookup_source_ids).toEqual([]);
+    expect(sourceTable?.event_definition_ids).toEqual(eventDefinitionIds);
     expect(await collectionExists(db, sourceRecordsCollection)).toBe(false);
+    await expect(
+      db
+        .customCheckpointRequests({
+          replicationStreamId: first.replicationStreamId,
+          eventId: eventDefinitionId
+        })
+        .findOne({ user_id: 'user-1' })
+    ).resolves.not.toBeNull();
 
     const streamDoc = (await db.sync_rules.findOne({ _id: first.replicationStreamId })) as ReplicationStreamDocumentV3;
     expect(streamDoc.sync_configs.map((config) => config.state)).toEqual([storage.SyncRuleState.ACTIVE]);
@@ -429,9 +448,9 @@ event_definitions:
   test('cleans up event-only source tables no longer triggered by a live sync config', async () => {
     await using factory = await INITIALIZED_MONGO_STORAGE_FACTORY.factory();
 
-    // The first config syncs `todos` and additionally fires events for `audit_log`. The
-    // `audit_log` table is referenced only by the event trigger, so its source table carries
-    // empty membership arrays (an event-only table).
+    // The first config syncs `todos` and additionally evaluates the audit event for `audit_log`. The
+    // `audit_log` table is referenced only by the event trigger, so its source table has only an
+    // event membership (an event-only table).
     const first = await factory.updateSyncRules(
       updateSyncRulesFromYaml(
         `
@@ -450,7 +469,7 @@ event_definitions:
         { storageVersion: 3 }
       )
     );
-    const firstStorage = factory.getInstance(first) as MongoSyncBucketStorageV3;
+    const firstStorage = (await getTestStorage(factory, first)) as MongoSyncBucketStorageV3;
     const db = firstStorage.db as VersionedPowerSyncMongoV3;
     await using firstWriter = await firstStorage.createWriter(test_utils.BATCH_OPTIONS);
 
@@ -485,21 +504,27 @@ event_definitions:
       },
       afterReplicaId: test_utils.rid('audit-1')
     });
+    const auditEventDefinitionId = [...auditTable.eventDefinitionIds!][0];
+    firstWriter.addCustomWriteCheckpoint({
+      user_id: 'audit-user',
+      checkpoint: 1n,
+      event_id: auditEventDefinitionId
+    });
     await firstWriter.markAllSnapshotDone('1/1');
     await firstWriter.commit('1/1');
 
     const todosTableId = todosTable.id as bson.ObjectId;
     const auditTableId = auditTable.id as bson.ObjectId;
-    // The event-only table is persisted with empty membership arrays, so the membership filter
-    // never selects it.
+    // The event-only table has empty bucket and parameter memberships, plus its event id.
     const auditSourceTable = await db.sourceTables(first.replicationStreamId).findOne({ _id: auditTableId });
     expect(auditSourceTable?.bucket_data_source_ids).toEqual([]);
     expect(auditSourceTable?.parameter_lookup_source_ids).toEqual([]);
+    expect(auditSourceTable?.event_definition_ids).toHaveLength(1);
     const auditRecordsCollection = db.sourceRecords(first.replicationStreamId, auditTableId).collectionName;
 
     // The second (active) config keeps the same `by_owner` stream but drops the audit event.
-    // The shared bucket definition stays in use, so no bucket/parameter ids become unused and
-    // the membership-cleanup block is skipped entirely.
+    // The shared bucket definition stays in use, while the unused event id selects this table for
+    // membership cleanup.
     const second = await factory.updateSyncRules(
       updateSyncRulesFromYaml(
         `
@@ -516,7 +541,7 @@ streams:
     expect(second.replicationStreamId).toBe(first.replicationStreamId);
 
     const replicatingStreams = await factory.getReplicatingReplicationStreams();
-    const secondStorage = factory.getInstance(replicatingStreams[0]) as MongoSyncBucketStorageV3;
+    const secondStorage = (await getTestStorage(factory, replicatingStreams[0])) as MongoSyncBucketStorageV3;
     await using secondWriter = await secondStorage.createWriter(test_utils.BATCH_OPTIONS);
     await secondWriter.markAllSnapshotDone('2/1');
     await secondWriter.commit('2/1');
@@ -537,6 +562,11 @@ streams:
     // The orphaned event-only table and its source records are removed...
     expect(await db.sourceTables(first.replicationStreamId).countDocuments({ _id: auditTableId })).toBe(0);
     expect(await collectionExists(db, auditRecordsCollection)).toBe(false);
+    const auditCheckpointCollection = db.customCheckpointRequests({
+      replicationStreamId: first.replicationStreamId,
+      eventId: auditEventDefinitionId
+    }).collectionName;
+    expect(await collectionExists(db, auditCheckpointCollection)).toBe(false);
     // ...while the data table still used by the live config is retained.
     expect(await db.sourceTables(first.replicationStreamId).countDocuments({ _id: todosTableId })).toBe(1);
 
@@ -572,7 +602,7 @@ streams:
         { storageVersion: 3 }
       )
     );
-    const firstStorage = factory.getInstance(first) as MongoSyncBucketStorageV3;
+    const firstStorage = (await getTestStorage(factory, first)) as MongoSyncBucketStorageV3;
     const db = firstStorage.db as VersionedPowerSyncMongoV3;
     await using firstWriter = await firstStorage.createWriter(test_utils.BATCH_OPTIONS);
     const resolved = await firstWriter.resolveTables({
@@ -625,7 +655,7 @@ streams:
     expect(secondIndexId).toBe(roleIndexId);
 
     const replicatingStreams = await factory.getReplicatingReplicationStreams();
-    const secondStorage = factory.getInstance(replicatingStreams[0]) as MongoSyncBucketStorageV3;
+    const secondStorage = (await getTestStorage(factory, replicatingStreams[0])) as MongoSyncBucketStorageV3;
     await using secondWriter = await secondStorage.createWriter(test_utils.BATCH_OPTIONS);
     await secondWriter.markAllSnapshotDone('2/1');
     await secondWriter.commit('2/1');
@@ -637,7 +667,10 @@ streams:
     expect(await collectionExists(db, orgParameterIndexCollection)).toBe(false);
     expect(await collectionExists(db, sourceRecordsCollection)).toBe(true);
 
-    const activeStorage = (await factory.getActiveSyncConfig())!.storage as MongoSyncBucketStorageV3;
+    const activeStorage = (await getTestStorage(
+      factory,
+      (await factory.getActiveSyncConfig())!.replicationStream
+    )) as MongoSyncBucketStorageV3;
     await using activeWriter = await activeStorage.createWriter(test_utils.BATCH_OPTIONS);
     const activeTable = (
       await activeWriter.resolveTables({

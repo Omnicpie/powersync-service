@@ -1,5 +1,6 @@
 import { storage, updateSyncRulesFromYaml } from '@powersync/service-core';
 import { expect, test } from 'vitest';
+import { getTestStorage } from '../test-utils/leased-storage.js';
 import * as test_utils from '../test-utils/test-utils-index.js';
 import { compactActive } from './util.js';
 
@@ -32,12 +33,15 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
 
     const abortController = new AbortController();
     context.onTestFinished(() => abortController.abort());
     const iter = bucketStorage
-      .watchCheckpointChanges({ user_id: 'user1', signal: abortController.signal })
+      .watchCheckpointChanges({
+        user_id: 'user1',
+        signal: abortController.signal
+      })
       [Symbol.asyncIterator]();
 
     await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
@@ -78,7 +82,7 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
 
     await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
     await writer.markAllSnapshotDone('1/1');
@@ -86,7 +90,10 @@ bucket_definitions:
     const abortController = new AbortController();
     context.onTestFinished(() => abortController.abort());
     const iter = bucketStorage
-      .watchCheckpointChanges({ user_id: 'user1', signal: abortController.signal })
+      .watchCheckpointChanges({
+        user_id: 'user1',
+        signal: abortController.signal
+      })
       [Symbol.asyncIterator]();
 
     await writer.keepalive('5/0');
@@ -144,7 +151,7 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
 
     const first = await createManagedWriteCheckpointResult(bucketStorage, {
       user_id: 'user1',
@@ -195,7 +202,7 @@ bucket_definitions:
     expect(generated.shouldAdvance).toBe(true);
   });
 
-  test('custom write checkpoints - checkpoint after write', async (context) => {
+  test.runIf((storageVersion ?? 1) < 3)('custom write checkpoints - checkpoint after write', async (context) => {
     await using factory = await generateStorageFactory();
     const r = await factory.configureSyncRules(
       updateSyncRulesFromYaml(
@@ -210,8 +217,10 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
-    bucketStorage.setWriteCheckpointMode(storage.WriteCheckpointMode.CUSTOM);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
+    bucketStorage.setWriteCheckpointMode({
+      mode: storage.WriteCheckpointMode.CUSTOM
+    });
 
     await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
     await writer.markAllSnapshotDone('1/1');
@@ -219,7 +228,10 @@ bucket_definitions:
     const abortController = new AbortController();
     context.onTestFinished(() => abortController.abort());
     const iter = bucketStorage
-      .watchCheckpointChanges({ user_id: 'user1', signal: abortController.signal })
+      .watchCheckpointChanges({
+        user_id: 'user1',
+        signal: abortController.signal
+      })
       [Symbol.asyncIterator]();
 
     writer.addCustomWriteCheckpoint({
@@ -241,7 +253,7 @@ bucket_definitions:
     });
   });
 
-  test('custom write checkpoints - standalone checkpoint', async (context) => {
+  test.runIf((storageVersion ?? 1) < 3)('custom write checkpoints - standalone checkpoint', async (context) => {
     await using factory = await generateStorageFactory();
     const r = await factory.configureSyncRules(
       updateSyncRulesFromYaml(
@@ -256,8 +268,10 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
-    bucketStorage.setWriteCheckpointMode(storage.WriteCheckpointMode.CUSTOM);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
+    bucketStorage.setWriteCheckpointMode({
+      mode: storage.WriteCheckpointMode.CUSTOM
+    });
 
     await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
     await writer.markAllSnapshotDone('1/1');
@@ -265,7 +279,10 @@ bucket_definitions:
     const abortController = new AbortController();
     context.onTestFinished(() => abortController.abort());
     const iter = bucketStorage
-      .watchCheckpointChanges({ user_id: 'user1', signal: abortController.signal })
+      .watchCheckpointChanges({
+        user_id: 'user1',
+        signal: abortController.signal
+      })
       [Symbol.asyncIterator]();
 
     // Flush to clear state
@@ -290,7 +307,7 @@ bucket_definitions:
     });
   });
 
-  test('custom write checkpoints - write after checkpoint', async (context) => {
+  test.runIf((storageVersion ?? 1) < 3)('custom write checkpoints - write after checkpoint', async (context) => {
     await using factory = await generateStorageFactory();
     const r = await factory.configureSyncRules(
       updateSyncRulesFromYaml(
@@ -305,8 +322,10 @@ bucket_definitions:
         }
       )
     );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
-    bucketStorage.setWriteCheckpointMode(storage.WriteCheckpointMode.CUSTOM);
+    const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
+    bucketStorage.setWriteCheckpointMode({
+      mode: storage.WriteCheckpointMode.CUSTOM
+    });
 
     await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
     await writer.markAllSnapshotDone('1/1');
@@ -314,7 +333,10 @@ bucket_definitions:
     const abortController = new AbortController();
     context.onTestFinished(() => abortController.abort());
     const iter = bucketStorage
-      .watchCheckpointChanges({ user_id: 'user1', signal: abortController.signal })
+      .watchCheckpointChanges({
+        user_id: 'user1',
+        signal: abortController.signal
+      })
       [Symbol.asyncIterator]();
 
     await writer.keepalive('5/0');
@@ -369,50 +391,55 @@ bucket_definitions:
     });
   });
 
-  test('custom write checkpoints - checkpoint request markers are temporary', async () => {
-    await using factory = await generateStorageFactory();
-    const r = await factory.configureSyncRules(
-      updateSyncRulesFromYaml(
-        `
+  test.runIf((storageVersion ?? 1) < 3)(
+    'custom write checkpoints - checkpoint request markers are temporary',
+    async () => {
+      await using factory = await generateStorageFactory();
+      const r = await factory.configureSyncRules(
+        updateSyncRulesFromYaml(
+          `
 bucket_definitions:
   mybucket:
     data: []
     `,
-        {
-          validate: false,
-          storageVersion
-        }
-      )
-    );
-    const bucketStorage = factory.getInstance(r.persisted_sync_rules!);
-    bucketStorage.setWriteCheckpointMode(storage.WriteCheckpointMode.CUSTOM);
+          {
+            validate: false,
+            storageVersion
+          }
+        )
+      );
+      const bucketStorage = await getTestStorage(factory, r.persisted_sync_rules!);
+      bucketStorage.setWriteCheckpointMode({
+        mode: storage.WriteCheckpointMode.CUSTOM
+      });
 
-    await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
-    await writer.markAllSnapshotDone('1/1');
+      await using writer = await bucketStorage.createWriter(test_utils.BATCH_OPTIONS);
+      await writer.markAllSnapshotDone('1/1');
 
-    writer.addCustomWriteCheckpoint({
-      checkpoint: 5n,
-      user_id: 'persistent'
-    });
-    writer.addCustomWriteCheckpoint({
-      checkpoint: 6n,
-      user_id: 'temporary',
-      checkpoint_requested_at: new Date('2024-01-01T00:00:00.000Z')
-    });
-    await writer.flush();
-    await writer.keepalive('1/1');
+      writer.addCustomWriteCheckpoint({
+        checkpoint: 5n,
+        user_id: 'persistent'
+      });
+      writer.addCustomWriteCheckpoint({
+        checkpoint: 6n,
+        user_id: 'temporary',
+        checkpoint_requested_at: new Date('2024-01-01T00:00:00.000Z')
+      });
+      await writer.flush();
+      await writer.keepalive('1/1');
 
-    await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'persistent' })).resolves.toEqual(5n);
-    await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'temporary' })).resolves.toEqual(6n);
+      await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'persistent' })).resolves.toEqual(5n);
+      await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'temporary' })).resolves.toEqual(6n);
 
-    await compactActive(factory, {
-      compactBuckets: [],
-      deleteCheckpointRequestsBefore: new Date(Date.now() + 1_000)
-    });
+      await compactActive(factory, {
+        compactBuckets: [],
+        deleteCheckpointRequestsBefore: new Date(Date.now() + 1_000)
+      });
 
-    await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'persistent' })).resolves.toEqual(5n);
-    await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'temporary' })).resolves.toBeNull();
-  });
+      await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'persistent' })).resolves.toEqual(5n);
+      await expect(bucketStorage.lastWriteCheckpoint({ user_id: 'temporary' })).resolves.toBeNull();
+    }
+  );
 }
 
 async function createManagedWriteCheckpoint(
