@@ -34,7 +34,7 @@ export const MONGODB_REPLICATION_SOURCE_CAPABILITIES: ReplicationSourceCapabilit
 };
 
 export class MongoReplicationSourceAdapter implements ReplicationBenchmarkSourceAdapter {
-  readonly id = 'mongodb-source' as const;
+  readonly id = 'source:mongodb' as const;
   readonly capabilities = MONGODB_REPLICATION_SOURCE_CAPABILITIES;
 
   private readonly client: mongo.MongoClient;

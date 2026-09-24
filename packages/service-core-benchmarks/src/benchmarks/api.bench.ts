@@ -57,11 +57,9 @@ const cases: readonly ApiBenchmarkCase[] = [
   }
 ];
 
-describe.each(cases)('$scenario.id', (benchmarkCase) => {
-  const { scenario } = benchmarkCase;
-
+describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
-    const benchmark = new ApiBenchmark(scenario, benchmarkCase.implementation, {
+    const benchmark = new ApiBenchmark(scenario, implementation, {
       runId: randomUUID(),
       monitors: [
         new NodeProcessResourceMonitor(),

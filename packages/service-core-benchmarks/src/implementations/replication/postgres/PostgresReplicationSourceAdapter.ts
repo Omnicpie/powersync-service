@@ -86,7 +86,7 @@ export function postgresPublicationSettingsForCatalogRow(
 }
 
 export class PostgresReplicationSourceAdapter implements ReplicationBenchmarkSourceAdapter {
-  readonly id = 'postgres-source' as const;
+  readonly id = 'source:postgres' as const;
   readonly capabilities = POSTGRES_REPLICATION_SOURCE_CAPABILITIES;
 
   private readonly connectionConfig;

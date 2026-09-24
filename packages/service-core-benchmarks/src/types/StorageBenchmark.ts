@@ -2,7 +2,7 @@ import { storage } from '@powersync/service-core';
 import { BenchmarkIterationRuntime } from './BenchmarkRunOptions.js';
 import { BenchmarkScenario } from './BenchmarkScenario.js';
 
-export type StorageBenchmarkImplementationId = 'postgres-storage' | 'mongodb-storage';
+export type StorageBenchmarkImplementationId = 'storage:postgres' | 'storage:mongodb';
 
 export interface StorageBenchmarkWorkload {
   readonly row_count: number;

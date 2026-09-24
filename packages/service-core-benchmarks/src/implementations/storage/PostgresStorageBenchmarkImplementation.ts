@@ -9,7 +9,7 @@ import {
 } from '../../types/StorageBenchmark.js';
 
 export class PostgresStorageBenchmarkImplementation implements StorageBenchmarkImplementation {
-  readonly id = 'postgres-storage' as const;
+  readonly id = 'storage:postgres' as const;
 
   constructor(private readonly options: PostgresStorageBenchmarkImplementationOptions) {}
 

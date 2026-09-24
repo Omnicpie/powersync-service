@@ -28,12 +28,19 @@ export function createMongoSourceQuickReplicationScenario(
     description: `MongoDB ${phase} replication into ${storage} storage version ${storageVersion}`,
     layer: 'replication',
     profile: 'quick',
-    tags: ['replication', phase, 'baseline', 'mongodb-source', storage, `storage-v${storageVersion}`, 'quick'],
-    prerequisites: ['mongodb-source', storage],
+    tags: [
+      'layer:replication',
+      `phase:${phase}`,
+      'source:mongodb',
+      storage,
+      `version:${storageVersion}`,
+      'profile:quick'
+    ],
+    prerequisites: ['source:mongodb', storage],
     timeout_ms: 120_000,
     warmup_iterations: 1,
     measured_iterations: 3,
-    producer: 'mongodb-source',
+    producer: 'source:mongodb',
     phase,
     storage: { implementation: storage, version: storageVersion },
     checkpoint_policy: 'target-visible',
@@ -61,12 +68,19 @@ export function createPostgresSourceQuickReplicationScenario(
     description: `PostgreSQL ${phase} replication into ${storage} storage version ${storageVersion}`,
     layer: 'replication',
     profile: 'quick',
-    tags: ['replication', phase, 'baseline', 'postgres-source', storage, `storage-v${storageVersion}`, 'quick'],
-    prerequisites: ['postgres-source', storage],
+    tags: [
+      'layer:replication',
+      `phase:${phase}`,
+      'source:postgres',
+      storage,
+      `version:${storageVersion}`,
+      'profile:quick'
+    ],
+    prerequisites: ['source:postgres', storage],
     timeout_ms: 120_000,
     warmup_iterations: 1,
     measured_iterations: 3,
-    producer: 'postgres-source',
+    producer: 'source:postgres',
     phase,
     storage: { implementation: storage, version: storageVersion },
     checkpoint_policy: 'target-visible',
@@ -93,7 +107,7 @@ export function createMongoSourceCategoryReplicationScenario(
     ...scenario,
     id: `replication.snapshot.buckets-10.mongodb-source.${storage}.v${storageVersion}.quick`,
     description: `MongoDB snapshot replication across 10 category buckets into ${storage} storage version ${storageVersion}`,
-    tags: [...scenario.tags.filter((tag) => tag !== 'baseline'), 'multi-buckets', 'buckets-10'],
+    tags: [...scenario.tags, 'shape:10-buckets'],
     syncRule: createCategoryReplicationSyncRules,
     sync_parameters: createCategorySyncParameters(),
     expected_bucket_count: 10
@@ -102,7 +116,7 @@ export function createMongoSourceCategoryReplicationScenario(
 
 export function postgresReplicationStorage(version: number): ReplicationBenchmarkStorageSelection {
   return {
-    id: 'postgres-storage',
+    id: 'storage:postgres',
     version,
     createChildDescriptor(environment) {
       const url = requiredEnvironmentUrl(environment, 'BENCHMARK_POSTGRES_STORAGE_URL', 'PostgreSQL storage');
@@ -118,7 +132,7 @@ export function postgresReplicationStorage(version: number): ReplicationBenchmar
 
 export function mongoReplicationStorage(version: number): ReplicationBenchmarkStorageSelection {
   return {
-    id: 'mongodb-storage',
+    id: 'storage:mongodb',
     version,
     createChildDescriptor(environment) {
       const url = requiredEnvironmentUrl(environment, 'BENCHMARK_MONGODB_STORAGE_URL', 'MongoDB storage');
@@ -134,7 +148,7 @@ export function mongoReplicationStorage(version: number): ReplicationBenchmarkSt
 
 export function mongoReplicationSource(): ReplicationBenchmarkSourceSelection {
   return {
-    id: 'mongodb-source',
+    id: 'source:mongodb',
     resolveIterationFactory(environment) {
       const { sourceUrl } = resolveMongoSourceBenchmarkConfiguration(environment);
       return () => {
@@ -158,7 +172,7 @@ export function mongoReplicationSource(): ReplicationBenchmarkSourceSelection {
 
 export function postgresReplicationSource(): ReplicationBenchmarkSourceSelection {
   return {
-    id: 'postgres-source',
+    id: 'source:postgres',
     resolveIterationFactory(environment) {
       const { sourceUrl } = resolvePostgresSourceBenchmarkConfiguration(environment);
       return () => {

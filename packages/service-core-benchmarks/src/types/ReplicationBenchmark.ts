@@ -3,7 +3,7 @@ import { BenchmarkScenario, BenchmarkSourceTable } from './BenchmarkScenario.js'
 import { SnapshotBenchmarkItem, SnapshotBenchmarkManifest, SnapshotBenchmarkTarget } from './SnapshotBenchmark.js';
 import { StorageBenchmarkImplementationId } from './StorageBenchmark.js';
 
-export type ReplicationBenchmarkProducerId = 'postgres-source' | 'mongodb-source';
+export type ReplicationBenchmarkProducerId = 'source:postgres' | 'source:mongodb';
 
 export type ReplicationBenchmarkPhase = 'snapshot' | 'streaming' | 'catch-up';
 

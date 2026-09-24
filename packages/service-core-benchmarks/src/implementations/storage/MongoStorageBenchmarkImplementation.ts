@@ -6,7 +6,7 @@ import {
 } from '../../types/StorageBenchmark.js';
 
 export class MongoStorageBenchmarkImplementation implements StorageBenchmarkImplementation {
-  readonly id = 'mongodb-storage' as const;
+  readonly id = 'storage:mongodb' as const;
 
   constructor(private readonly options: MongoStorageBenchmarkImplementationOptions) {}
 

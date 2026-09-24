@@ -35,7 +35,7 @@ export function createQuickCombinedScenario(
     description: `Initial snapshot from ${source} through ${storage} storage version ${storageVersion} to one NDJSON client`,
     layer: 'combined',
     profile: 'quick',
-    tags: ['combined', 'initial', 'baseline', source, storage, `storage-v${storageVersion}`, 'quick', 'http', 'ndjson'],
+    tags: ['layer:combined', 'phase:snapshot', source, storage, `version:${storageVersion}`, 'profile:quick'],
     prerequisites: [source, storage],
     timeout_ms: 120_000,
     warmup_iterations: 1,
@@ -63,7 +63,7 @@ export function createCategoryCombinedScenario(
     ...scenario,
     id: `combined.initial.buckets-10.${source}.${storage}.v${storageVersion}.quick.ndjson`,
     description: `Initial snapshot from ${source} across 10 category buckets through ${storage} storage version ${storageVersion} to one NDJSON client`,
-    tags: [...scenario.tags.filter((tag) => tag !== 'baseline'), 'multi-buckets', 'buckets-10'],
+    tags: [...scenario.tags, 'shape:10-buckets'],
     syncRule: createCategoryReplicationSyncRules,
     sync_parameters: createCategorySyncParameters(),
     expected_bucket_count: 10
@@ -93,7 +93,7 @@ export function createCategoryCombinedCases(storageVersion: number): CombinedBen
     createCategoryCombinedCase(postgresSource, mongoStorage),
     createCategoryCombinedCase(mongoSource, postgresStorage),
     createCategoryCombinedCase(mongoSource, mongoStorage, assertDistinctMongoSourceAndStorage)
-  ]
+  ];
 }
 
 function createCategoryCombinedCase(

@@ -7,7 +7,7 @@ import {
 
 export function createPostgresQuickStorageScenario(version: number): StorageBenchmarkScenario {
   return createQuickStorageScenario(
-    'postgres-storage',
+    'storage:postgres',
     'Write 1000 rows to global bucket directly to PostgreSQL bucket storage',
     version
   );
@@ -15,7 +15,7 @@ export function createPostgresQuickStorageScenario(version: number): StorageBenc
 
 export function createMongoQuickStorageScenario(version: number): StorageBenchmarkScenario {
   return createQuickStorageScenario(
-    'mongodb-storage',
+    'storage:mongodb',
     'Write 1000 rows to global bucket directly to MongoDB bucket storage',
     version
   );
@@ -27,7 +27,7 @@ export function createPostgresCategoryStorageScenario(version: number): StorageB
     ...scenario,
     id: `storage.write.buckets-10.postgres-storage.v${version}.quick`,
     description: 'Write 10000 rows across 10 category buckets directly to PostgreSQL bucket storage',
-    tags: [...scenario.tags, 'multi-buckets', 'buckets-10'],
+    tags: [...scenario.tags, 'shape:10-buckets'],
     syncRule: createCategoryStorageSyncRules,
     sync_parameters: createCategorySyncParameters(),
     expected_bucket_count: 10
@@ -40,7 +40,7 @@ export function createMongoCategoryStorageScenario(version: number): StorageBenc
     ...scenario,
     id: `storage.write.buckets-10.mongo-storage.v${version}.quick`,
     description: 'Write 10000 rows across 10 category buckets directly to MongoDB bucket storage',
-    tags: [...scenario.tags, 'multi-buckets', 'buckets-10'],
+    tags: [...scenario.tags, 'shape:10-buckets'],
     syncRule: createCategoryStorageSyncRules,
     sync_parameters: createCategorySyncParameters(),
     expected_bucket_count: 10
@@ -57,7 +57,7 @@ function createQuickStorageScenario(
     description,
     layer: 'storage',
     profile: 'quick',
-    tags: ['storage', 'quick', implementation],
+    tags: ['layer:storage', 'profile:quick', implementation],
     prerequisites: [implementation],
     timeout_ms: 120_000,
     warmup_iterations: 1,
