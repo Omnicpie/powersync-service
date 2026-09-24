@@ -29,13 +29,35 @@ This installs and builds the service, then runs the entire suite of tests, which
 
 For example, running just the quick suite can be be done like so:
 
+```sh
+pnpm benchmark:test --tags-filter="profile:quick"
 ```
-pnpm benchmark:test --tags-filter="quick"
+
+Alternatively, set the `BENCHMARK_TAGS_FILTER` environment variable:
+
+```sh
+BENCHMARK_TAGS_FILTER="profile:quick and storage:postgres" pnpm benchmark:test
 ```
 
 A full list of available tags can be retrieved either from the [vitest config](./src/vitest.config.ts), or by running `pnpm benchmark:test --list-tags`.
 
 After a successful run `pnpm benchmark:report` can be run to generate report, both in CLI, and saved to a `benchmark-artifacts` folder.
+
+### Running from a pull request comment
+
+Repository members and owners can trigger the benchmark workflow by commenting on an open pull request:
+
+```
+Benchmark this
+```
+
+To select a subset, add a Vitest tag expression after "Benchmark this", this will then be passed as an environment variable to the run
+
+```
+Benchmark this profile:quick
+Benchmark this profile:quick and storage:postgres
+Benchmark this (layer:api or layer:storage) and not storage:mongodb
+```
 
 ### Available commands
 

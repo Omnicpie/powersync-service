@@ -1,7 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+const tagsFilter = process.env.BENCHMARK_TAGS_FILTER?.trim();
+
+export default defineConfig(() => ({
   test: {
+    tagsFilter: tagsFilter ? [tagsFilter] : undefined,
     include: ['src/benchmarks/**/*.bench.ts'],
     pool: 'threads',
     fileParallelism: false,
@@ -26,4 +29,4 @@ export default defineConfig({
       { name: 'shape:10-buckets' }
     ]
   }
-});
+}));

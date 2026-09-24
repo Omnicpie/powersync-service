@@ -11,7 +11,7 @@ jobs:
       contents: read
     name: Build and run benchmarks on PR
     # If the comment is against a PR from a member and starts with "benchmark this"
-    if: ${{ github.event.issue.pull_request && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') && (startsWith(github.event.comment.body, 'benchmark this') || startsWith(github.event.comment.body, 'Benchmark this'))}}
+    if: ${{ github.event.issue.pull_request && github.event.issue.state == 'open' && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') && (startsWith(github.event.comment.body, 'benchmark this') || startsWith(github.event.comment.body, 'Benchmark this'))}}
     runs-on: ubuntu-latest
 
     env:
@@ -23,6 +23,18 @@ jobs:
       MONGO_TEST_URL: mongodb://localhost:27018/powersync_test
 
     steps:
+      - name: Set tags from comment
+        id: benchmark-options
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const match = context.payload.comment.body.trim().match(/^benchmark this(?:\s+([\s\S]*))?$/i);
+            if (!match) {
+              core.setFailed('Use "Benchmark this" followed optionally by a Vitest tag expression.');
+              return;
+            }
+            core.setOutput('tags-filter', (match[1] ?? '').trim());
+
       - uses: actions/checkout@v5
 
       - name: Login to Docker Hub
@@ -52,6 +64,8 @@ jobs:
           mongodb-port: 27017
 
       - name: Run Benchmarks
+        env:
+          BENCHMARK_TAGS_FILTER: ${{ steps.benchmark-options.outputs.tags-filter }}
         run: pnpm benchmark:test
 
       - name: Run Report
