@@ -48,6 +48,7 @@ export class StorageBenchmark extends Benchmark<
     const manifest = generateBaselineStorageRows(this.scenario.workload);
     const flushes = { count: 0 };
     let replicationStream: storage.PersistedReplicationStream | undefined;
+    let replicationLock: storage.ReplicationLock | undefined;
     let bucketStorage: storage.SyncRulesBucketStorage | undefined;
     let writer: storage.BucketStorageBatch | undefined;
 
@@ -59,7 +60,8 @@ export class StorageBenchmark extends Benchmark<
           storageVersion: this.scenario.storage.version
         })
       );
-      bucketStorage = run.resource.factory.getInstance(replicationStream);
+      replicationLock = await replicationStream.lock();
+      bucketStorage = run.resource.factory.getInstance(replicationStream, { replicationLock });
       const syncRulesContent = replicationStream.syncConfigContent[0];
       writer = await bucketStorage.createWriter({
         ...BATCH_OPTIONS,
@@ -75,6 +77,7 @@ export class StorageBenchmark extends Benchmark<
       return {
         runtime,
         replicationStream,
+        replicationLock,
         storage: bucketStorage,
         syncRulesContent,
         writer,
@@ -84,7 +87,7 @@ export class StorageBenchmark extends Benchmark<
         targetPosition: TARGET_POSITION
       };
     } catch (error) {
-      await this.cleanupPartialIteration(writer, replicationStream, bucketStorage, error);
+      await this.cleanupPartialIteration(writer, replicationLock, bucketStorage, error);
       throw error;
     }
   }
@@ -193,7 +196,7 @@ export class StorageBenchmark extends Benchmark<
   }
 
   protected async cleanupIteration(context: StorageBenchmarkIterationContext): Promise<void> {
-    await this.cleanupResources(context.writer, context.replicationStream, context.storage);
+    await this.cleanupResources(context.writer, context.replicationLock, context.storage);
   }
 
   protected async collectRunMetadata(run: StorageBenchmarkRunContext): Promise<object> {
@@ -210,12 +213,12 @@ export class StorageBenchmark extends Benchmark<
 
   private async cleanupPartialIteration(
     writer: storage.BucketStorageBatch | undefined,
-    replicationStream: storage.PersistedReplicationStream | undefined,
+    replicationLock: storage.ReplicationLock | undefined,
     bucketStorage: storage.SyncRulesBucketStorage | undefined,
     setupError: unknown
   ): Promise<void> {
     try {
-      await this.cleanupResources(writer, replicationStream, bucketStorage);
+      await this.cleanupResources(writer, replicationLock, bucketStorage);
     } catch (cleanupError) {
       throw new AggregateError([setupError, cleanupError], 'Storage iteration setup and cleanup failed');
     }
@@ -223,7 +226,7 @@ export class StorageBenchmark extends Benchmark<
 
   private async cleanupResources(
     writer: storage.BucketStorageBatch | undefined,
-    replicationStream: storage.PersistedReplicationStream | undefined,
+    replicationLock: storage.ReplicationLock | undefined,
     bucketStorage: storage.SyncRulesBucketStorage | undefined
   ): Promise<void> {
     const errors: unknown[] = [];
@@ -234,21 +237,18 @@ export class StorageBenchmark extends Benchmark<
         errors.push(error);
       }
     }
-    if (replicationStream != null && bucketStorage != null) {
-      let lock: storage.ReplicationLock | undefined;
+    if (bucketStorage != null) {
       try {
-        lock = await replicationStream.lock();
         await bucketStorage.terminate({ clearStorage: true });
       } catch (error) {
         errors.push(error);
-      } finally {
-        if (lock != null) {
-          try {
-            await lock.release();
-          } catch (error) {
-            errors.push(error);
-          }
-        }
+      }
+    }
+    if (replicationLock != null) {
+      try {
+        await replicationLock.release();
+      } catch (error) {
+        errors.push(error);
       }
     }
     if (errors.length > 0) {

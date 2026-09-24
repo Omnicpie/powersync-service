@@ -29,6 +29,7 @@ interface ApiBenchmarkRunContext {
 interface ApiBenchmarkIterationContext {
   readonly runtime: BenchmarkIterationRuntime;
   readonly replicationStream: storage.PersistedReplicationStream;
+  readonly replicationLock: storage.ReplicationLock;
   readonly bucketStorage: storage.SyncRulesBucketStorage;
   readonly writer: storage.BucketStorageBatch;
   readonly serviceContext: system.ServiceContextContainer;
@@ -63,6 +64,7 @@ export class ApiBenchmark extends Benchmark<
     runtime: BenchmarkIterationRuntime
   ): Promise<ApiBenchmarkIterationContext> {
     let replicationStream: storage.PersistedReplicationStream | undefined;
+    let replicationLock: storage.ReplicationLock | undefined;
     let bucketStorage: storage.SyncRulesBucketStorage | undefined;
     let writer: storage.BucketStorageBatch | undefined;
     let serviceContext: system.ServiceContextContainer | undefined;
@@ -79,7 +81,8 @@ export class ApiBenchmark extends Benchmark<
         })
       );
 
-      bucketStorage = run.resource.factory.getInstance(replicationStream);
+      replicationLock = await replicationStream.lock();
+      bucketStorage = run.resource.factory.getInstance(replicationStream, { replicationLock });
       writer = await bucketStorage.createWriter(BATCH_OPTIONS);
       const sourceTable = await resolveTestTable(writer, 'benchmark_items', ['id'], run.resource);
       await writer.markAllSnapshotDone('0/0');
@@ -110,6 +113,7 @@ export class ApiBenchmark extends Benchmark<
       return {
         runtime,
         replicationStream,
+        replicationLock,
         bucketStorage,
         writer,
         serviceContext,
@@ -117,7 +121,7 @@ export class ApiBenchmark extends Benchmark<
         token: await createToken(key.signingKey)
       };
     } catch (error) {
-      await cleanup(serviceContext, writer, replicationStream, bucketStorage, error);
+      await cleanup(serviceContext, writer, replicationLock, bucketStorage, error);
       throw error;
     }
   }
@@ -187,7 +191,7 @@ export class ApiBenchmark extends Benchmark<
   }
 
   protected async cleanupIteration(context: ApiBenchmarkIterationContext): Promise<void> {
-    await cleanup(context.serviceContext, context.writer, context.replicationStream, context.bucketStorage);
+    await cleanup(context.serviceContext, context.writer, context.replicationLock, context.bucketStorage);
   }
 
   protected async collectRunMetadata(run: ApiBenchmarkRunContext): Promise<object> {

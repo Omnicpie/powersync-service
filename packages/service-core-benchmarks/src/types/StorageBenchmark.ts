@@ -67,6 +67,7 @@ export interface StorageBenchmarkFlushCounter {
 export interface StorageBenchmarkIterationContext {
   readonly runtime: BenchmarkIterationRuntime;
   readonly replicationStream: storage.PersistedReplicationStream;
+  readonly replicationLock: storage.ReplicationLock;
   readonly storage: storage.SyncRulesBucketStorage;
   readonly syncRulesContent: storage.PersistedSyncConfigContent;
   readonly writer: storage.BucketStorageBatch;

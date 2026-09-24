@@ -98,7 +98,7 @@ export const reservePort = async (): Promise<number> => {
 export const cleanup = async (
   serviceContext: system.ServiceContextContainer | undefined,
   writer: storage.BucketStorageBatch | undefined,
-  replicationStream: storage.PersistedReplicationStream | undefined,
+  replicationLock: storage.ReplicationLock | undefined,
   bucketStorage: storage.SyncRulesBucketStorage | undefined,
   setupError?: unknown
 ): Promise<void> => {
@@ -119,21 +119,19 @@ export const cleanup = async (
     }
   }
 
-  if (replicationStream != null && bucketStorage != null) {
-    let lock: storage.ReplicationLock | undefined;
+  if (bucketStorage != null) {
     try {
-      lock = await replicationStream.lock();
       await bucketStorage.terminate({ clearStorage: true });
     } catch (error) {
       errors.push(error);
-    } finally {
-      if (lock != null) {
-        try {
-          await lock.release();
-        } catch (error) {
-          errors.push(error);
-        }
-      }
+    }
+  }
+
+  if (replicationLock != null) {
+    try {
+      await replicationLock.release();
+    } catch (error) {
+      errors.push(error);
     }
   }
 
