@@ -1,6 +1,7 @@
 import { container } from '@powersync/lib-services-framework';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, test } from 'vitest';
+import { env } from '../env.js';
 import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
 import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
@@ -44,7 +45,7 @@ function createPostgresCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
   return {
     scenario,
     implementation: new PostgresStorageBenchmarkImplementation({
-      url: process.env.PG_STORAGE_TEST_URL ?? 'postgres://postgres:postgres@localhost:5432/powersync_storage_test'
+      url: env.PG_STORAGE_TEST_URL
     })
   };
 }
@@ -53,8 +54,8 @@ function createMongoCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
   return {
     scenario,
     implementation: new MongoStorageBenchmarkImplementation({
-      url: process.env.MONGO_TEST_URL ?? 'mongodb://localhost:27017/powersync_test',
-      isCI: process.env.CI === 'true'
+      url: env.MONGO_TEST_URL,
+      isCI: env.CI
     })
   };
 }

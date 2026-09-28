@@ -1,9 +1,11 @@
+import { fixtureEnvironment } from '../../../env.js';
+
 export interface PostgresSourceBenchmarkConfiguration {
   readonly sourceUrl: string;
 }
 
 export function resolvePostgresSourceBenchmarkConfiguration(
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = fixtureEnvironment
 ): PostgresSourceBenchmarkConfiguration {
   const sourceUrl = requiredEnvironmentUrl(
     environment,

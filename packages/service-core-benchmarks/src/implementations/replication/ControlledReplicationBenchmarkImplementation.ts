@@ -1,3 +1,4 @@
+import { fixtureEnvironment } from '../../env.js';
 import { ReplicationChildResourceMonitor } from '../../monitors/ReplicationChildResourceMonitor.js';
 import { ForkedReplicationChildTransport } from '../../replication/ForkedReplicationChildTransport.js';
 import { ReplicationChildClassDescriptor } from '../../replication/ReplicationChildClassLoader.js';
@@ -54,10 +55,10 @@ export class ControlledReplicationBenchmarkImplementation implements Replication
 
   async open(signal: AbortSignal, runId: string): Promise<ReplicationBenchmarkRunResource> {
     signal.throwIfAborted();
-    const fixtureEnvironment = this.options.environment ?? process.env;
-    const createIterationSource = this.options.source.resolveIterationFactory(fixtureEnvironment);
-    const storageDescriptor = this.options.storage.createChildDescriptor(fixtureEnvironment);
-    this.options.validateEnvironment?.(fixtureEnvironment);
+    const environmentVariables = this.options.environment ?? fixtureEnvironment;
+    const createIterationSource = this.options.source.resolveIterationFactory(environmentVariables);
+    const storageDescriptor = this.options.storage.createChildDescriptor(environmentVariables);
+    this.options.validateEnvironment?.(environmentVariables);
     const environment: Record<string, unknown> = {};
     let activeIteration: ControlledReplicationIterationResource | undefined;
     let disposed = false;

@@ -1,3 +1,4 @@
+import { databaseUrlDefaults, fixtureEnvironment } from '../env.js';
 import type { BenchmarkResourceComponent } from '../types/BenchmarkResource.js';
 import type { BenchmarkLayer } from '../types/BenchmarkScenario.js';
 import type { ReplicationBenchmarkProducerId } from '../types/ReplicationBenchmark.js';
@@ -17,7 +18,7 @@ interface DatabaseMonitorTarget {
 
 export function databaseMonitorTargets(
   scenario: DatabaseScenario,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = fixtureEnvironment
 ): DatabaseMonitorTarget[] {
   const replication = scenario.layer === 'replication' || scenario.layer === 'combined';
   const targets: DatabaseMonitorTarget[] = [];
@@ -34,9 +35,7 @@ export function databaseMonitorTargets(
     : postgres
       ? 'PG_STORAGE_TEST_URL'
       : 'MONGO_TEST_URL';
-  const fallback = postgres
-    ? 'postgres://postgres:postgres@localhost:5432/powersync_storage_test'
-    : 'mongodb://localhost:27017/powersync_test';
+  const fallback = postgres ? databaseUrlDefaults.PG_STORAGE_TEST_URL : databaseUrlDefaults.MONGO_TEST_URL;
   targets.push({ component: 'storage_database', url: environment[variable] ?? (replication ? '' : fallback) });
   return targets;
 }

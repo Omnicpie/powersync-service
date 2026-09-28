@@ -1,5 +1,6 @@
 import { CombinedChildController, CombinedChildTransport } from '../../combined/CombinedChildController.js';
 import { ForkedCombinedChildTransport } from '../../combined/ForkedCombinedChildTransport.js';
+import { fixtureEnvironment } from '../../env.js';
 import { CombinedChildResourceMonitor } from '../../monitors/CombinedChildResourceMonitor.js';
 import { CombinedBenchmarkImplementation, CombinedBenchmarkRunResource } from '../../types/CombinedBenchmark.js';
 import { ReplicationBenchmarkSourceAdapter } from '../../types/ReplicationBenchmark.js';
@@ -39,10 +40,10 @@ export class ControlledCombinedBenchmarkImplementation implements CombinedBenchm
 
   async open(signal: AbortSignal, runId: string): Promise<CombinedBenchmarkRunResource> {
     signal.throwIfAborted();
-    const fixtureEnvironment = this.options.environment ?? process.env;
-    const createIterationSource = this.options.source.resolveIterationFactory(fixtureEnvironment);
-    const storageDescriptor = this.options.storage.createChildDescriptor(fixtureEnvironment);
-    this.options.validateEnvironment?.(fixtureEnvironment);
+    const environmentVariables = this.options.environment ?? fixtureEnvironment;
+    const createIterationSource = this.options.source.resolveIterationFactory(environmentVariables);
+    const storageDescriptor = this.options.storage.createChildDescriptor(environmentVariables);
+    this.options.validateEnvironment?.(environmentVariables);
     const environment: Record<string, unknown> = {};
     let activeIteration: ControlledCombinedIterationResource | undefined;
     let orphanedSource: ReplicationBenchmarkSourceAdapter | undefined;

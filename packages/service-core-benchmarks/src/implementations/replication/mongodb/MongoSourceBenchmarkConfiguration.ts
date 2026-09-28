@@ -1,9 +1,11 @@
+import { fixtureEnvironment } from '../../../env.js';
+
 export interface MongoSourceBenchmarkConfiguration {
   readonly sourceUrl: string;
 }
 
 export function resolveMongoSourceBenchmarkConfiguration(
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = fixtureEnvironment
 ): MongoSourceBenchmarkConfiguration {
   const sourceUrl = requiredEnvironmentUrl(environment, 'BENCHMARK_MONGODB_SOURCE_URL');
   canonicalMongoAuthority(sourceUrl);
