@@ -43,6 +43,12 @@ A full list of available tags can be retrieved either from the [vitest config](.
 
 After a run, `pnpm benchmark:report` can be run to generate report, both in CLI, and saved to a `benchmark-artifacts` folder.
 
+### Database CPU and memory
+
+The suite records CPU time and sampled memory usage for local MongoDB and PostgreSQL Docker containers during measured iterations. Replication and combined benchmarks report source and storage databases separately. The monitor matches each database URL to a unique container by its published local port, so source and storage services need distinct ports. The reported container memory excludes inactive file cache and is different from process RSS.
+
+If Docker is inaccessible, the URL points to a remote database, or no unique container matches, the database resource result is `unavailable` and the benchmark continues. Local runs can use `DOCKER_HOST=unix:///path/to/docker.sock` when the Docker socket is not at `/var/run/docker.sock`.
+
 ### Running from a pull request comment
 
 Repository members and owners can trigger the benchmark workflow by commenting on an open pull request:

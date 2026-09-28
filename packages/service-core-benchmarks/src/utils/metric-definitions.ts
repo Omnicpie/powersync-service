@@ -33,6 +33,10 @@ export const resourceUnits: Record<string, string> = {
   rss_average_bytes: 'bytes',
   rss_peak_bytes: 'bytes',
   rss_delta_bytes: 'bytes',
+  memory_baseline_bytes: 'bytes',
+  memory_average_bytes: 'bytes',
+  memory_peak_bytes: 'bytes',
+  memory_delta_bytes: 'bytes',
   sample_interval_ms: 'ms',
   sample_count: 'samples'
 };

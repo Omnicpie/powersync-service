@@ -14,7 +14,7 @@ export type ReportRow = Record<string, string | number>;
 const percentileNote =
   'Statistics use successful measured iterations only. p95 requires 20 samples; p99 requires 100. Sample counts are shown for each metric.';
 const resourceNote =
-  'CPU and RSS cover the monitor execution window, not individual timing boundaries. RSS peaks are sampled observations; child monitors sample only the start and end.';
+  'CPU and memory cover the monitor execution window, not individual timing boundaries. RSS is process memory; database memory is Docker container usage excluding inactive file cache. Peaks are sampled observations; child monitors sample only the start and end.';
 
 export function createReport(run: SuiteManifest, results: readonly BenchmarkResult[]): BenchmarkReport {
   return {

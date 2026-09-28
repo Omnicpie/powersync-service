@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
-import { UnavailableResourceMonitor } from '../monitors/UnavailableResourceMonitor.js';
+import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { CombinedBenchmark } from '../runner/CombinedBenchmark.js';
 import { createCategoryCombinedCases, createQuickCombinedCases } from '../scenarios/combined-scenarios.js';
 import { mongoReplicationStorage, postgresReplicationStorage } from '../scenarios/replication-scenarios.js';
@@ -29,7 +29,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
       monitors: [
         new NodeProcessResourceMonitor(),
         implementation.createServiceMonitor(),
-        new UnavailableResourceMonitor('storage_database', 'Database resource monitoring is not implemented')
+        ...createDatabaseResourceMonitors(scenario)
       ],
       signal: AbortSignal.timeout(scenario.timeout_ms - 10_000)
     });

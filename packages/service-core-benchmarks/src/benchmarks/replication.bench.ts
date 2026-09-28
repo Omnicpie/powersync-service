@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { assertDistinctMongoSourceAndStorage } from '../implementations/replication/mongodb/MongoSourceBenchmarkConfiguration.js';
 import { assertDistinctPostgresSourceAndStorage } from '../implementations/replication/postgres/PostgresSourceBenchmarkConfiguration.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
-import { UnavailableResourceMonitor } from '../monitors/UnavailableResourceMonitor.js';
+import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { ReplicationBenchmark } from '../runner/ReplicationBenchmark.js';
 import {
   mongoReplicationStorage,
@@ -46,7 +46,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
       monitors: [
         new NodeProcessResourceMonitor(),
         implementation.createServiceMonitor(),
-        new UnavailableResourceMonitor('storage_database', 'Database resource monitoring is not implemented')
+        ...createDatabaseResourceMonitors(scenario)
       ],
       signal: AbortSignal.timeout(scenario.timeout_ms - 10_000)
     });

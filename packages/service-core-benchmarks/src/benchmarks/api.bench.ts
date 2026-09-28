@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
 import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
-import { UnavailableResourceMonitor } from '../monitors/UnavailableResourceMonitor.js';
+import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { ApiBenchmark } from '../runner/ApiBenchmark.js';
 import {
   createMongoCategoryApiScenario,
@@ -63,10 +63,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
     const benchmark = new ApiBenchmark(scenario, implementation, {
       runId: randomUUID(),
-      monitors: [
-        new NodeProcessResourceMonitor(),
-        new UnavailableResourceMonitor('storage_database', 'Database resource monitoring is not implemented')
-      ],
+      monitors: [new NodeProcessResourceMonitor(), ...createDatabaseResourceMonitors(scenario)],
       signal: AbortSignal.timeout(scenario.timeout_ms - 10_000)
     });
 
