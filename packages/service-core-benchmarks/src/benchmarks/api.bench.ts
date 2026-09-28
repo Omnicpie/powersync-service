@@ -1,7 +1,6 @@
 import { container } from '@powersync/lib-services-framework';
 import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
 import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
@@ -16,11 +15,10 @@ import {
 } from '../scenarios/api-scenarios.js';
 import { ApiBenchmarkScenario } from '../types/ApiBenchmark.js';
 import { StorageBenchmarkImplementation } from '../types/StorageBenchmark.js';
-import { createArtifactsFolder, getArtifactFilename } from '../utils/output.js';
+import { writeBenchmarkResult } from '../utils/output.js';
 
-beforeAll(async () => {
+beforeAll(() => {
   container.registerDefaults();
-  await createArtifactsFolder();
 });
 
 interface ApiBenchmarkCase {
@@ -69,7 +67,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
     });
 
     const result = await benchmark.run();
-    await writeFile(getArtifactFilename(scenario.id), `${JSON.stringify(result)}\n`, 'utf8');
+    await writeBenchmarkResult(result);
 
     console.info(JSON.stringify({ scenario: result.scenario.id, summary: result.summary }, null, 2));
 

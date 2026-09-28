@@ -1,7 +1,6 @@
 import { STORAGE_VERSION_1, STORAGE_VERSION_2, STORAGE_VERSION_3 } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
 import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
@@ -14,12 +13,7 @@ import {
   createPostgresQuickStorageScenario
 } from '../scenarios/storage-scenarios.js';
 import { StorageBenchmarkImplementation, StorageBenchmarkScenario } from '../types/StorageBenchmark.js';
-import { createArtifactsFolder, getArtifactFilename } from '../utils/output.js';
-
-beforeAll(async () => {
-  // TODO: Move this outside of this test file, into setup
-  await createArtifactsFolder();
-});
+import { writeBenchmarkResult } from '../utils/output.js';
 
 interface StorageBenchmarkCase {
   readonly scenario: StorageBenchmarkScenario;
@@ -132,8 +126,7 @@ describe.each(benchmarkCases)(
 
       const result = await benchmark.run();
 
-      //TODO: Make this not overwrite?
-      await writeFile(getArtifactFilename(scenario.id), `${JSON.stringify(result)}\n`, 'utf8');
+      await writeBenchmarkResult(result);
       // Log the result
       console.info(
         JSON.stringify(

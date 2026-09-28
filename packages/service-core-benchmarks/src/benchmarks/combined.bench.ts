@@ -1,16 +1,11 @@
 import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
 import { UnavailableResourceMonitor } from '../monitors/UnavailableResourceMonitor.js';
 import { CombinedBenchmark } from '../runner/CombinedBenchmark.js';
 import { createCategoryCombinedCases, createQuickCombinedCases } from '../scenarios/combined-scenarios.js';
-import { createArtifactsFolder, getArtifactFilename } from '../utils/output.js';
-
-beforeAll(async () => {
-  await createArtifactsFolder();
-});
+import { writeBenchmarkResult } from '../utils/output.js';
 
 const cases = [
   ...createCategoryCombinedCases(CURRENT_STORAGE_VERSION),
@@ -30,7 +25,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
     });
 
     const result = await benchmark.run();
-    await writeFile(getArtifactFilename(scenario.id), `${JSON.stringify(result)}\n`, 'utf8');
+    await writeBenchmarkResult(result);
 
     expect(result.status, JSON.stringify(result, null, 2)).toBe('passed');
     expect(result.iterations.map(({ kind, status }) => ({ kind, status }))).toEqual([

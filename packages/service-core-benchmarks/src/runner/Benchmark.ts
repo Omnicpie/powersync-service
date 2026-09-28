@@ -56,7 +56,7 @@ export abstract class Benchmark<Scenario extends BenchmarkScenario, RunContext, 
       }
 
       try {
-        result.summary = summarizeBenchmarkIterations(result.iterations);
+        result.summary = summarizeBenchmarkIterations(result.iterations, this.scenario.layer);
       } catch (error) {
         result.errors.push(toBenchmarkError('aggregate_results', error));
       }

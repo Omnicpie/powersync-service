@@ -41,7 +41,7 @@ BENCHMARK_TAGS_FILTER="profile:quick and storage:postgres" pnpm benchmark:test
 
 A full list of available tags can be retrieved either from the [vitest config](./src/vitest.config.ts), or by running `pnpm benchmark:test --list-tags`.
 
-After a successful run `pnpm benchmark:report` can be run to generate report, both in CLI, and saved to a `benchmark-artifacts` folder.
+After a run, `pnpm benchmark:report` can be run to generate report, both in CLI, and saved to a `benchmark-artifacts` folder.
 
 ### Running from a pull request comment
 
@@ -63,3 +63,17 @@ Benchmark this (layer:api or layer:storage) and not storage:mongodb
 
 - `benchmark:test` - runs the test suite
 - `benchmark:report` - generates the report for a previous benchmark run
+
+### Reports and run history
+
+Each time `benchmark:test` is run, a new folder is created in `benchmark-artifacts`, within a unique `<run-id>/` folder, This folder will then contain the metrics and reports for that given run to prevent lost data over multiple runs, or different runs of the benchmarking suite to maintain previous runs in its own results.
+
+Within the benchmark-artifacts folder will be a `latest.json` file containing the run-id for the most recent benchmark run.
+
+Run `pnpm benchmark:report` to report the latest **started** suite, including failed or empty runs. It never falls back to an older successful run. To select a retained run explicitly:
+
+```sh
+pnpm benchmark:report --run-id <run-id>
+```
+
+When a report is made, it will take the raw data from the run's `json` folder, which is will then collate into a report, This report will calculate some metrics from the raw data, and present that data with the appropriate units, both in the console, and saved to a `report` folder within the run, containing the formatted data as `json` and `markdown`

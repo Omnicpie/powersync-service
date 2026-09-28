@@ -12,6 +12,7 @@ import {
   ReplicationBenchmarkScenario,
   ReplicationBenchmarkTarget
 } from '../types/ReplicationBenchmark.js';
+import { replicationWorkCounters } from '../utils/replication-counters.js';
 import { Benchmark } from './Benchmark.js';
 
 interface IterationState extends ReplicationBenchmarkIterationContext<ReplicationBenchmarkIterationResource> {
@@ -106,19 +107,19 @@ export class ReplicationBenchmark extends Benchmark<
       monotonicMilliseconds(startAtNs),
       monotonicMilliseconds(observation.checkpointVisibleAtNs)
     );
-    const sourceRows =
-      this.scenario.phase === 'snapshot'
-        ? manifest.snapshotRows.length
-        : manifest.transactions.reduce((total, transaction) => total + transaction.mutations.length, 0);
-    runtime.metrics.setCounter('source_rows', sourceRows);
+
+    const workCounters = replicationWorkCounters(this.scenario.phase, manifest, observation.operations);
+    Object.entries(workCounters).forEach((counter) => {
+      const [name, value] = counter;
+      runtime.metrics.setCounter(name, value);
+    });
+
     runtime.metrics.setCounter(
       'source_transactions',
       this.scenario.phase === 'snapshot' ? 0 : manifest.transactions.length
     );
     runtime.metrics.setCounter('source_logical_bytes', manifest.sourceLogicalBytes);
     runtime.metrics.setCounter('payload_bytes', manifest.payloadBytes);
-    runtime.metrics.setCounter('writer_save_calls', manifest.expectedPutCount);
-    runtime.metrics.setCounter('bucket_operations', observation.operations.length);
     runtime.metrics.setCounter('parameter_operations', 0);
     runtime.metrics.setCounter('distinct_buckets', observation.bucketCount);
     runtime.metrics.setCounter(

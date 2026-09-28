@@ -1,7 +1,6 @@
 import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { assertDistinctMongoSourceAndStorage } from '../implementations/replication/mongodb/MongoSourceBenchmarkConfiguration.js';
 import { assertDistinctPostgresSourceAndStorage } from '../implementations/replication/postgres/PostgresSourceBenchmarkConfiguration.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
@@ -14,11 +13,7 @@ import {
   postgresReplicationStorage,
   postgresSourceCase
 } from '../scenarios/replication-scenarios.js';
-import { createArtifactsFolder, getArtifactFilename } from '../utils/output.js';
-
-beforeAll(async () => {
-  await createArtifactsFolder();
-});
+import { writeBenchmarkResult } from '../utils/output.js';
 
 const postgresStorage = postgresReplicationStorage(CURRENT_STORAGE_VERSION);
 const mongoStorage = mongoReplicationStorage(CURRENT_STORAGE_VERSION);
@@ -45,7 +40,7 @@ describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
     });
 
     const result = await benchmark.run();
-    await writeFile(getArtifactFilename(scenario.id), `${JSON.stringify(result)}\n`, 'utf8');
+    await writeBenchmarkResult(result);
 
     expect(result.status, JSON.stringify(result, null, 2)).toBe('passed');
     expect(result.iterations).toHaveLength(scenario.warmup_iterations + scenario.measured_iterations);

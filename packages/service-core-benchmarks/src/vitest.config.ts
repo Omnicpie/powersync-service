@@ -4,6 +4,7 @@ const tagsFilter = process.env.BENCHMARK_TAGS_FILTER?.trim();
 
 export default defineConfig(() => ({
   test: {
+    globalSetup: ['./src/setup/benchmark-global-setup.ts'],
     tagsFilter: tagsFilter ? [tagsFilter] : undefined,
     include: ['src/benchmarks/**/*.bench.ts'],
     pool: 'threads',

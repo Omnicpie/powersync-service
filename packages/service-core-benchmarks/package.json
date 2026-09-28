@@ -12,7 +12,7 @@
     "build": "tsc -b",
     "clean": "rm -rf ./dist && tsc -b --clean",
     "benchmark:test": "vitest --config src/vitest.config.ts --run",
-    "benchmark:report": "node ./src/scripts/report.ts"
+    "benchmark:report": "node ./dist/scripts/report.js"
   },
   "dependencies": {
     "@powersync/lib-services-framework": "workspace:^",
