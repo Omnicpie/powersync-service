@@ -113,7 +113,7 @@ export class CombinedChildRuntime {
     payload: CombinedChildInitializePayload
   ): Promise<CombinedChildResponsePayloads['initialize']> {
     if (this.state.resource != null) throw new Error('Combined child is already initialized');
-    const implementation = await constructReplicationChildImplementation<unknown>(payload.storage);
+    const implementation = await constructReplicationChildImplementation(payload.storage);
     assertStorageImplementation(implementation, payload.storage.exportName);
     const resource = await implementation.open(new AbortController().signal);
 
@@ -139,7 +139,7 @@ export class CombinedChildRuntime {
     const resource = required(this.state.resource, 'storage resource');
     if (this.state.context != null) throw new Error('A combined child iteration is already configured');
 
-    const sourceImplementation = await constructReplicationChildImplementation<unknown>(payload.source);
+    const sourceImplementation = await constructReplicationChildImplementation(payload.source);
     assertSourceImplementation(sourceImplementation, payload.source.exportName);
     const sourceSetup = sourceImplementation.getServiceSetup();
     const collector = await auth.StaticKeyCollector.importKeys([payload.jwk]);

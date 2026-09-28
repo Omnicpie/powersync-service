@@ -79,13 +79,13 @@ export interface ReplicationBenchmarkSourceAdapter {
   cleanup(): Promise<void>;
 }
 
-export interface ReplicationBenchmarkRunContext<Resource> {
-  readonly resource: Resource;
+export interface ReplicationBenchmarkRunContext {
+  readonly resource: ReplicationBenchmarkRunResource;
 }
 
-export interface ReplicationBenchmarkIterationContext<Resource> {
+export interface ReplicationBenchmarkIterationContext {
   readonly runtime: BenchmarkIterationRuntime;
-  readonly resource: Resource;
+  readonly resource: ReplicationBenchmarkIterationResource;
   readonly manifest: ReplicationBenchmarkManifest;
 }
 

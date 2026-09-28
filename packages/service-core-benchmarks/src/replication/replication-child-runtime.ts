@@ -76,7 +76,7 @@ export class ReplicationChildRuntime {
     payload: ReplicationChildInitializePayload
   ): Promise<ReplicationChildResponsePayloads['initialize']> {
     if (this.state.resource != null) throw new Error('Replication child is already initialized');
-    const implementation = await constructReplicationChildImplementation<unknown>(payload.storage);
+    const implementation = await constructReplicationChildImplementation(payload.storage);
     assertStorageImplementation(implementation, payload.storage.exportName);
     const resource = await implementation.open(new AbortController().signal);
 
@@ -101,7 +101,7 @@ export class ReplicationChildRuntime {
   ): Promise<ReplicationChildResponsePayloads['setup_iteration']> {
     const resource = required(this.state.resource, 'storage resource');
     if (this.state.context != null) throw new Error('An iteration is already configured');
-    const implementation = await constructReplicationChildImplementation<unknown>(payload.source);
+    const implementation = await constructReplicationChildImplementation(payload.source);
     assertSourceImplementation(implementation, payload.source.exportName);
     const sourceConfiguration = implementation.getServiceSetup();
     const context = createBenchmarkServiceContext({

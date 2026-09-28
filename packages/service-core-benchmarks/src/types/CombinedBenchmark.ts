@@ -21,13 +21,13 @@ export interface CombinedBenchmarkScenario
   };
 }
 
-export interface CombinedBenchmarkRunContext<Resource> {
-  readonly resource: Resource;
+export interface CombinedBenchmarkRunContext {
+  readonly resource: CombinedBenchmarkRunResource;
 }
 
-export interface CombinedBenchmarkIterationContext<Resource> {
+export interface CombinedBenchmarkIterationContext {
   readonly runtime: BenchmarkIterationRuntime;
-  readonly resource: Resource;
+  readonly resource: CombinedBenchmarkIterationResource;
   readonly manifest: SnapshotBenchmarkManifest;
 }
 

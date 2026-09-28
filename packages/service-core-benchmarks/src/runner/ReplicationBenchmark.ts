@@ -5,23 +5,21 @@ import { BenchmarkRunOptions } from '../types/BenchmarkRunOptions.js';
 import {
   ReplicationBenchmarkImplementation,
   ReplicationBenchmarkIterationContext,
-  ReplicationBenchmarkIterationResource,
   ReplicationBenchmarkObservation,
   ReplicationBenchmarkRunContext,
-  ReplicationBenchmarkRunResource,
   ReplicationBenchmarkScenario,
   ReplicationBenchmarkTarget
 } from '../types/ReplicationBenchmark.js';
 import { replicationWorkCounters } from '../utils/replication-counters.js';
 import { Benchmark } from './Benchmark.js';
 
-interface IterationState extends ReplicationBenchmarkIterationContext<ReplicationBenchmarkIterationResource> {
+interface IterationState extends ReplicationBenchmarkIterationContext {
   keepalives: number;
 }
 
 export class ReplicationBenchmark extends Benchmark<
   ReplicationBenchmarkScenario,
-  ReplicationBenchmarkRunContext<ReplicationBenchmarkRunResource>,
+  ReplicationBenchmarkRunContext,
   IterationState,
   ReplicationBenchmarkObservation
 > {
@@ -33,9 +31,7 @@ export class ReplicationBenchmark extends Benchmark<
     super(scenario, runOptions);
   }
 
-  protected async setupRun(
-    signal: AbortSignal
-  ): Promise<ReplicationBenchmarkRunContext<ReplicationBenchmarkRunResource>> {
+  protected async setupRun(signal: AbortSignal): Promise<ReplicationBenchmarkRunContext> {
     if (this.scenario.phase === 'catch-up') {
       throw new Error('Replication catch-up is not supported by the current benchmark implementation');
     }
@@ -52,7 +48,7 @@ export class ReplicationBenchmark extends Benchmark<
   }
 
   protected async setupIteration(
-    run: ReplicationBenchmarkRunContext<ReplicationBenchmarkRunResource>,
+    run: ReplicationBenchmarkRunContext,
     runtime: IterationState['runtime']
   ): Promise<IterationState> {
     runtime.signal.throwIfAborted();
@@ -167,9 +163,7 @@ export class ReplicationBenchmark extends Benchmark<
     await context.resource.dispose();
   }
 
-  protected async collectRunMetadata(
-    run: ReplicationBenchmarkRunContext<ReplicationBenchmarkRunResource>
-  ): Promise<object> {
+  protected async collectRunMetadata(run: ReplicationBenchmarkRunContext): Promise<object> {
     return {
       ...run.resource.environment,
       producer: this.scenario.producer,
@@ -178,7 +172,7 @@ export class ReplicationBenchmark extends Benchmark<
     };
   }
 
-  protected async cleanupRun(run: ReplicationBenchmarkRunContext<ReplicationBenchmarkRunResource>): Promise<void> {
+  protected async cleanupRun(run: ReplicationBenchmarkRunContext): Promise<void> {
     await run.resource.dispose();
   }
 }

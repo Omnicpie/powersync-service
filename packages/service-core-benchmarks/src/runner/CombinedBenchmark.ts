@@ -6,10 +6,8 @@ import { BenchmarkRunOptions } from '../types/BenchmarkRunOptions.js';
 import {
   CombinedBenchmarkImplementation,
   CombinedBenchmarkIterationContext,
-  CombinedBenchmarkIterationResource,
   CombinedBenchmarkObservation,
   CombinedBenchmarkRunContext,
-  CombinedBenchmarkRunResource,
   CombinedBenchmarkScenario
 } from '../types/CombinedBenchmark.js';
 import { check } from '../utils/api-utils.js';
@@ -21,13 +19,10 @@ interface CombinedExecutionObservation {
   readonly client: NdjsonDrainObservation;
 }
 
-type RunContext = CombinedBenchmarkRunContext<CombinedBenchmarkRunResource>;
-type IterationContext = CombinedBenchmarkIterationContext<CombinedBenchmarkIterationResource>;
-
 export class CombinedBenchmark extends Benchmark<
   CombinedBenchmarkScenario,
-  RunContext,
-  IterationContext,
+  CombinedBenchmarkRunContext,
+  CombinedBenchmarkIterationContext,
   CombinedExecutionObservation
 > {
   constructor(
@@ -38,13 +33,16 @@ export class CombinedBenchmark extends Benchmark<
     super(scenario, runOptions);
   }
 
-  protected async setupRun(signal: AbortSignal): Promise<RunContext> {
+  protected async setupRun(signal: AbortSignal): Promise<CombinedBenchmarkRunContext> {
     this.validateImplementation();
     this.validateClientConfiguration();
     return { resource: await this.implementation.open(signal, this.runOptions.runId) };
   }
 
-  protected async setupIteration(run: RunContext, runtime: IterationContext['runtime']): Promise<IterationContext> {
+  protected async setupIteration(
+    run: CombinedBenchmarkRunContext,
+    runtime: CombinedBenchmarkIterationContext['runtime']
+  ): Promise<CombinedBenchmarkIterationContext> {
     runtime.signal.throwIfAborted();
     const manifest = generateBaselineSnapshotManifest(this.scenario.workload);
     const resource = await run.resource.createIteration({
@@ -55,8 +53,8 @@ export class CombinedBenchmark extends Benchmark<
     return { runtime, resource, manifest };
   }
 
-  protected async executeIteration(context: IterationContext): Promise<CombinedExecutionObservation> {
-    const { runtime, resource, manifest } = context;
+  protected async executeIteration(context: CombinedBenchmarkIterationContext): Promise<CombinedExecutionObservation> {
+    const { runtime, resource } = context;
     runtime.signal.throwIfAborted();
     runtime.metrics.startBoundary('end_to_end_snapshot', 'replication_release_start');
     try {
@@ -103,7 +101,7 @@ export class CombinedBenchmark extends Benchmark<
 
   protected async verifyIteration(
     observation: CombinedExecutionObservation,
-    context: IterationContext
+    context: CombinedBenchmarkIterationContext
   ): Promise<BenchmarkCorrectnessResult> {
     const { storage, client } = observation;
     const comparison = context.resource.comparePosition(storage.checkpoint, storage.target);
@@ -195,11 +193,11 @@ export class CombinedBenchmark extends Benchmark<
     return { passed: checks.every((candidate) => candidate.passed), checks };
   }
 
-  protected async cleanupIteration(context: IterationContext): Promise<void> {
+  protected async cleanupIteration(context: CombinedBenchmarkIterationContext): Promise<void> {
     await context.resource.dispose();
   }
 
-  protected async collectRunMetadata(run: RunContext): Promise<object> {
+  protected async collectRunMetadata(run: CombinedBenchmarkRunContext): Promise<object> {
     return {
       ...run.resource.environment,
       producer: this.scenario.producer,
@@ -211,7 +209,7 @@ export class CombinedBenchmark extends Benchmark<
     };
   }
 
-  protected async cleanupRun(run: RunContext): Promise<void> {
+  protected async cleanupRun(run: CombinedBenchmarkRunContext): Promise<void> {
     await run.resource.dispose();
   }
 
@@ -241,7 +239,7 @@ export class CombinedBenchmark extends Benchmark<
   }
 
   private recordCounters(
-    context: IterationContext,
+    context: CombinedBenchmarkIterationContext,
     storage: CombinedBenchmarkObservation,
     client: NdjsonDrainObservation
   ): void {
