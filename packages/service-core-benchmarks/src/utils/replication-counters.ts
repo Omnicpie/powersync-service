@@ -14,13 +14,12 @@ export function replicationWorkCounters(
     phase === 'snapshot'
       ? manifest.snapshotRows
       : manifest.transactions.flatMap((transaction) => transaction.mutations.map((mutation) => mutation.row));
+  const measuredIds = new Set(rows.map((row) => row.id));
 
   const bucket_operations =
     phase === 'snapshot'
       ? operations.length
       : operations.filter((operation) => operation.object_id != null && measuredIds.has(operation.object_id)).length;
-
-  const measuredIds = new Set(rows.map((row) => row.id));
 
   return {
     source_rows: rows.length,

@@ -13,12 +13,7 @@ import {
   createCategorySyncParameters,
   createReplicationSyncRules
 } from '../utils/replication-sync-rules.js';
-import {
-  mongoReplicationSource,
-  mongoReplicationStorage,
-  postgresReplicationSource,
-  postgresReplicationStorage
-} from './replication-scenarios.js';
+import { mongoReplicationSource, postgresReplicationSource } from './replication-scenarios.js';
 
 export interface CombinedBenchmarkCase {
   readonly scenario: CombinedBenchmarkScenario;
@@ -70,29 +65,39 @@ export function createCategoryCombinedScenario(
   };
 }
 
-export function createQuickCombinedCases(storageVersion: number): readonly CombinedBenchmarkCase[] {
+export function createQuickCombinedCases(
+  storage: ReplicationBenchmarkStorageSelection
+): readonly CombinedBenchmarkCase[] {
   const postgresSource = postgresReplicationSource();
   const mongoSource = mongoReplicationSource();
-  const postgresStorage = postgresReplicationStorage(storageVersion);
-  const mongoStorage = mongoReplicationStorage(storageVersion);
   return [
-    createCombinedCase(postgresSource, postgresStorage, assertDistinctPostgresSourceAndStorage),
-    createCombinedCase(postgresSource, mongoStorage),
-    createCombinedCase(mongoSource, postgresStorage),
-    createCombinedCase(mongoSource, mongoStorage, assertDistinctMongoSourceAndStorage)
+    createCombinedCase(
+      postgresSource,
+      storage,
+      storage.id === 'storage:postgres' ? assertDistinctPostgresSourceAndStorage : undefined
+    ),
+    createCombinedCase(
+      mongoSource,
+      storage,
+      storage.id === 'storage:mongodb' ? assertDistinctMongoSourceAndStorage : undefined
+    )
   ];
 }
 
-export function createCategoryCombinedCases(storageVersion: number): CombinedBenchmarkCase[] {
+export function createCategoryCombinedCases(storage: ReplicationBenchmarkStorageSelection): CombinedBenchmarkCase[] {
   const postgresSource = postgresReplicationSource();
   const mongoSource = mongoReplicationSource();
-  const postgresStorage = postgresReplicationStorage(storageVersion);
-  const mongoStorage = mongoReplicationStorage(storageVersion);
   return [
-    createCategoryCombinedCase(postgresSource, postgresStorage, assertDistinctPostgresSourceAndStorage),
-    createCategoryCombinedCase(postgresSource, mongoStorage),
-    createCategoryCombinedCase(mongoSource, postgresStorage),
-    createCategoryCombinedCase(mongoSource, mongoStorage, assertDistinctMongoSourceAndStorage)
+    createCategoryCombinedCase(
+      postgresSource,
+      storage,
+      storage.id === 'storage:postgres' ? assertDistinctPostgresSourceAndStorage : undefined
+    ),
+    createCategoryCombinedCase(
+      mongoSource,
+      storage,
+      storage.id === 'storage:mongodb' ? assertDistinctMongoSourceAndStorage : undefined
+    )
   ];
 }
 

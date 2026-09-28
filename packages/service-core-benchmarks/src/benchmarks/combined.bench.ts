@@ -1,15 +1,25 @@
-import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
 import { UnavailableResourceMonitor } from '../monitors/UnavailableResourceMonitor.js';
 import { CombinedBenchmark } from '../runner/CombinedBenchmark.js';
 import { createCategoryCombinedCases, createQuickCombinedCases } from '../scenarios/combined-scenarios.js';
+import { mongoReplicationStorage, postgresReplicationStorage } from '../scenarios/replication-scenarios.js';
+import {
+  MONGO_STORAGE_BENCHMARK_VERSIONS,
+  POSTGRES_STORAGE_BENCHMARK_VERSIONS
+} from '../scenarios/storage-versions.js';
 import { writeBenchmarkResult } from '../utils/output.js';
 
 const cases = [
-  ...createCategoryCombinedCases(CURRENT_STORAGE_VERSION),
-  ...createQuickCombinedCases(CURRENT_STORAGE_VERSION)
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = postgresReplicationStorage(version);
+    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+  }),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = mongoReplicationStorage(version);
+    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+  })
 ];
 
 describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {

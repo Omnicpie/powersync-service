@@ -1,4 +1,3 @@
-import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { assertDistinctMongoSourceAndStorage } from '../implementations/replication/mongodb/MongoSourceBenchmarkConfiguration.js';
@@ -13,18 +12,31 @@ import {
   postgresReplicationStorage,
   postgresSourceCase
 } from '../scenarios/replication-scenarios.js';
+import {
+  MONGO_STORAGE_BENCHMARK_VERSIONS,
+  POSTGRES_STORAGE_BENCHMARK_VERSIONS
+} from '../scenarios/storage-versions.js';
 import { writeBenchmarkResult } from '../utils/output.js';
 
-const postgresStorage = postgresReplicationStorage(CURRENT_STORAGE_VERSION);
-const mongoStorage = mongoReplicationStorage(CURRENT_STORAGE_VERSION);
 const cases = [
-  mongoSourceCategoryCase(postgresStorage),
-  mongoSourceCase('snapshot', postgresStorage),
-  mongoSourceCase('streaming', postgresStorage),
-  mongoSourceCase('snapshot', mongoStorage, assertDistinctMongoSourceAndStorage),
-  mongoSourceCase('streaming', mongoStorage, assertDistinctMongoSourceAndStorage),
-  postgresSourceCase(postgresStorage, assertDistinctPostgresSourceAndStorage),
-  postgresSourceCase(mongoStorage)
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = postgresReplicationStorage(version);
+    return [
+      mongoSourceCategoryCase(storage),
+      mongoSourceCase('snapshot', storage),
+      mongoSourceCase('streaming', storage),
+      postgresSourceCase(storage, assertDistinctPostgresSourceAndStorage)
+    ];
+  }),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = mongoReplicationStorage(version);
+    return [
+      mongoSourceCategoryCase(storage, assertDistinctMongoSourceAndStorage),
+      mongoSourceCase('snapshot', storage, assertDistinctMongoSourceAndStorage),
+      mongoSourceCase('streaming', storage, assertDistinctMongoSourceAndStorage),
+      postgresSourceCase(storage)
+    ];
+  })
 ];
 
 describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {

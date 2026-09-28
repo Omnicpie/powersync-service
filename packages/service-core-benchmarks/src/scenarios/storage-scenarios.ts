@@ -57,7 +57,7 @@ function createQuickStorageScenario(
     description,
     layer: 'storage',
     profile: 'quick',
-    tags: ['layer:storage', 'profile:quick', implementation],
+    tags: ['layer:storage', 'profile:quick', implementation, `version:${version}`],
     prerequisites: [implementation],
     timeout_ms: 120_000,
     warmup_iterations: 1,

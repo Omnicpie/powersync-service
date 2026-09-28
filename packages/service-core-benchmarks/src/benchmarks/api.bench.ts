@@ -1,5 +1,4 @@
 import { container } from '@powersync/lib-services-framework';
-import { CURRENT_STORAGE_VERSION } from '@powersync/service-core';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
@@ -13,6 +12,10 @@ import {
   createPostgresCategoryApiScenario,
   createPostgresQuickApiScenario
 } from '../scenarios/api-scenarios.js';
+import {
+  MONGO_STORAGE_BENCHMARK_VERSIONS,
+  POSTGRES_STORAGE_BENCHMARK_VERSIONS
+} from '../scenarios/storage-versions.js';
 import { ApiBenchmarkScenario } from '../types/ApiBenchmark.js';
 import { StorageBenchmarkImplementation } from '../types/StorageBenchmark.js';
 import { writeBenchmarkResult } from '../utils/output.js';
@@ -27,33 +30,34 @@ interface ApiBenchmarkCase {
 }
 
 const cases: readonly ApiBenchmarkCase[] = [
-  {
-    scenario: createPostgresCategoryApiScenario(CURRENT_STORAGE_VERSION),
-    implementation: new PostgresStorageBenchmarkImplementation({
-      url: process.env.PG_STORAGE_TEST_URL ?? 'postgres://postgres:postgres@localhost:5432/powersync_storage_test'
-    })
-  },
-  {
-    scenario: createPostgresQuickApiScenario(CURRENT_STORAGE_VERSION),
-    implementation: new PostgresStorageBenchmarkImplementation({
-      url: process.env.PG_STORAGE_TEST_URL ?? 'postgres://postgres:postgres@localhost:5432/powersync_storage_test'
-    })
-  },
-  {
-    scenario: createMongoQuickApiScenario(CURRENT_STORAGE_VERSION),
-    implementation: new MongoStorageBenchmarkImplementation({
-      url: process.env.MONGO_TEST_URL ?? 'mongodb://localhost:27017/powersync_test',
-      isCI: process.env.CI === 'true'
-    })
-  },
-  {
-    scenario: createMongoCategoryApiScenario(CURRENT_STORAGE_VERSION),
-    implementation: new MongoStorageBenchmarkImplementation({
-      url: process.env.MONGO_TEST_URL ?? 'mongodb://localhost:27017/powersync_test',
-      isCI: process.env.CI === 'true'
-    })
-  }
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createPostgresCase(createPostgresCategoryApiScenario(version)),
+    createPostgresCase(createPostgresQuickApiScenario(version))
+  ]),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createMongoCase(createMongoQuickApiScenario(version)),
+    createMongoCase(createMongoCategoryApiScenario(version))
+  ])
 ];
+
+function createPostgresCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
+  return {
+    scenario,
+    implementation: new PostgresStorageBenchmarkImplementation({
+      url: process.env.PG_STORAGE_TEST_URL ?? 'postgres://postgres:postgres@localhost:5432/powersync_storage_test'
+    })
+  };
+}
+
+function createMongoCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
+  return {
+    scenario,
+    implementation: new MongoStorageBenchmarkImplementation({
+      url: process.env.MONGO_TEST_URL ?? 'mongodb://localhost:27017/powersync_test',
+      isCI: process.env.CI === 'true'
+    })
+  };
+}
 
 describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
