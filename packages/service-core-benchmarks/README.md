@@ -8,14 +8,12 @@ This is generally used to test changes to different areas of the service, allowi
 
 The benchmarks use environment variables to set the location of running instances of databases, which are used within the benchmarks:
 
-| Environment Variable           | Usage                                                         | Default Value                                                      |
-| ------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------ |
-| PG_STORAGE_TEST_URL            | A Postgres URL for storage benchmarks                         | postgres://postgres:postgres@localhost:5432/powersync_storage_test |
-| MONGO_TEST_URL                 | A MongoDB URL for storage benchmarks                          | mongodb://localhost:27017/powersync_test                           |
-| BENCHMARK_POSTGRES_STORAGE_URL | A Postgres URL for **bucket storage** in replication tests    | NONE                                                               |
-| BENCHMARK_POSTGRES_SOURCE_URL  | A Postgres URL for a **source** database in replication tests | NONE                                                               |
-| BENCHMARK_MONGODB_SOURCE_URL   | A MongoDB URL for a **source** database in replication tests  | NONE                                                               |
-| BENCHMARK_MONGODB_STORAGE_URL  | A MongoDB URL for **bucket storage** in replication tests     | NONE                                                               |
+| Environment Variable           | Usage                                                         | Default Value |
+| ------------------------------ | ------------------------------------------------------------- | ------------- |
+| BENCHMARK_POSTGRES_STORAGE_URL | A Postgres URL for bucket storage in all benchmarks           | NONE          |
+| BENCHMARK_POSTGRES_SOURCE_URL  | A Postgres URL for a **source** database in replication tests | NONE          |
+| BENCHMARK_MONGODB_SOURCE_URL   | A MongoDB URL for a **source** database in replication tests  | NONE          |
+| BENCHMARK_MONGODB_STORAGE_URL  | A MongoDB URL for bucket storage in all benchmarks            | NONE          |
 
 For ease of running the suite, a docker-compose file exists to start up the required databases for a run. To start the databases, run from the repository root:
 
@@ -26,12 +24,10 @@ docker compose -f packages/service-core-benchmarks/docker-compose.yaml up -d --w
 Then export these urls in the shell that the benchmarks will be run in:
 
 ```sh
-export PG_STORAGE_TEST_URL=postgres://postgres:postgres@localhost:5431/powersync_storage_test
+export BENCHMARK_POSTGRES_STORAGE_URL=postgres://postgres:postgres@localhost:5431/powersync_storage_test
 export BENCHMARK_POSTGRES_SOURCE_URL=postgres://postgres:postgres@localhost:5432/powersync_source_test
-export BENCHMARK_POSTGRES_STORAGE_URL="$PG_STORAGE_TEST_URL"
 export BENCHMARK_MONGODB_SOURCE_URL=mongodb://localhost:27017/powersync_test_data
 export BENCHMARK_MONGODB_STORAGE_URL=mongodb://localhost:27018/powersync_test
-export MONGO_TEST_URL="$BENCHMARK_MONGODB_STORAGE_URL"
 ```
 
 This can then be stopped by running `docker compose -f packages/service-core-benchmarks/docker-compose.yaml down`.

@@ -15,12 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      PG_STORAGE_TEST_URL: postgres://postgres:postgres@localhost:5431/powersync_storage_test
       BENCHMARK_POSTGRES_SOURCE_URL: postgres://postgres:postgres@localhost:5432/powersync_source_test
       BENCHMARK_POSTGRES_STORAGE_URL: postgres://postgres:postgres@localhost:5431/powersync_storage_test
       BENCHMARK_MONGODB_SOURCE_URL: mongodb://localhost:27017/powersync_test_data
       BENCHMARK_MONGODB_STORAGE_URL: mongodb://localhost:27018/powersync_test
-      MONGO_TEST_URL: mongodb://localhost:27018/powersync_test
       # Forks can pull public images without configuring Docker Hub credentials.
       HAS_DOCKERHUB_CREDENTIALS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 

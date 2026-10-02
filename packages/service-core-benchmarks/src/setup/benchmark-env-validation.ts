@@ -30,12 +30,12 @@ export function validateSelectedBenchmarkEnvironment(
     if (!matchesTags([...scenario.tags])) continue;
 
     const postgresStorage = scenario.storage.implementation === 'storage:postgres';
+    const storageVariable = postgresStorage ? 'BENCHMARK_POSTGRES_STORAGE_URL' : 'BENCHMARK_MONGODB_STORAGE_URL';
+    requiredVariables.add(storageVariable);
     if (scenario.layer === 'storage' || scenario.layer === 'api') {
-      requiredVariables.add(postgresStorage ? 'PG_STORAGE_TEST_URL' : 'MONGO_TEST_URL');
       continue;
     }
 
-    requiredVariables.add(postgresStorage ? 'BENCHMARK_POSTGRES_STORAGE_URL' : 'BENCHMARK_MONGODB_STORAGE_URL');
     if (scenario.producer === 'source:postgres') {
       requiredVariables.add('BENCHMARK_POSTGRES_SOURCE_URL');
       if (postgresStorage) distinctSources.add(scenario.producer);
@@ -54,7 +54,7 @@ export function validateSelectedBenchmarkEnvironment(
       continue;
     }
     try {
-      if (variable.includes('POSTGRES') || variable === 'PG_STORAGE_TEST_URL') {
+      if (variable.includes('POSTGRES')) {
         canonicalPostgresAuthority(value, variable);
       } else {
         try {

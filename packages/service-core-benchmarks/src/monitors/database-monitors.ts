@@ -1,4 +1,4 @@
-import { databaseUrlDefaults, fixtureEnvironment } from '../env.js';
+import { fixtureEnvironment } from '../env.js';
 import type { BenchmarkResourceComponent } from '../types/BenchmarkResource.js';
 import type { BenchmarkLayer } from '../types/BenchmarkScenario.js';
 import type { ReplicationBenchmarkProducerId } from '../types/ReplicationBenchmark.js';
@@ -28,15 +28,8 @@ export function databaseMonitorTargets(
     targets.push({ component: 'source_database', url: environment[variable] ?? '' });
   }
   const postgres = scenario.storage.implementation === 'storage:postgres';
-  const variable = replication
-    ? postgres
-      ? 'BENCHMARK_POSTGRES_STORAGE_URL'
-      : 'BENCHMARK_MONGODB_STORAGE_URL'
-    : postgres
-      ? 'PG_STORAGE_TEST_URL'
-      : 'MONGO_TEST_URL';
-  const fallback = postgres ? databaseUrlDefaults.PG_STORAGE_TEST_URL : databaseUrlDefaults.MONGO_TEST_URL;
-  targets.push({ component: 'storage_database', url: environment[variable] ?? (replication ? '' : fallback) });
+  const variable = postgres ? 'BENCHMARK_POSTGRES_STORAGE_URL' : 'BENCHMARK_MONGODB_STORAGE_URL';
+  targets.push({ component: 'storage_database', url: environment[variable]! });
   return targets;
 }
 

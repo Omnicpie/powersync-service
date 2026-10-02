@@ -102,21 +102,28 @@ export const allBenchmarkScenarios = [
 function createPostgresApiCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
   return {
     scenario,
-    implementation: new PostgresStorageBenchmarkImplementation({ url: env.PG_STORAGE_TEST_URL })
+    implementation: new PostgresStorageBenchmarkImplementation({
+      url: env.BENCHMARK_POSTGRES_STORAGE_URL!
+    })
   };
 }
 
 function createMongoApiCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
   return {
     scenario,
-    implementation: new MongoStorageBenchmarkImplementation({ url: env.MONGO_TEST_URL, isCI: env.CI })
+    implementation: new MongoStorageBenchmarkImplementation({
+      url: env.BENCHMARK_MONGODB_STORAGE_URL!,
+      isCI: env.CI
+    })
   };
 }
 
 function createPostgresStorageCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
   return {
     scenario,
-    implementation: new PostgresStorageBenchmarkImplementation({ url: env.PG_STORAGE_TEST_URL }),
+    implementation: new PostgresStorageBenchmarkImplementation({
+      url: env.BENCHMARK_POSTGRES_STORAGE_URL!
+    }),
     expectedStorage: { implementation: 'storage:postgres', version: scenario.storage.version }
   };
 }
@@ -124,7 +131,10 @@ function createPostgresStorageCase(scenario: StorageBenchmarkScenario): StorageB
 function createMongoStorageCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
   return {
     scenario,
-    implementation: new MongoStorageBenchmarkImplementation({ url: env.MONGO_TEST_URL, isCI: env.CI }),
+    implementation: new MongoStorageBenchmarkImplementation({
+      url: env.BENCHMARK_MONGODB_STORAGE_URL!,
+      isCI: env.CI
+    }),
     expectedStorage: { implementation: 'storage:mongodb', version: scenario.storage.version }
   };
 }
