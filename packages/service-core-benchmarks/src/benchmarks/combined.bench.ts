@@ -3,26 +3,10 @@ import { describe, expect, test } from 'vitest';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
 import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { CombinedBenchmark } from '../runner/CombinedBenchmark.js';
-import { createCategoryCombinedCases, createQuickCombinedCases } from '../scenarios/combined-scenarios.js';
-import { mongoReplicationStorage, postgresReplicationStorage } from '../scenarios/replication-scenarios.js';
-import {
-  MONGO_STORAGE_BENCHMARK_VERSIONS,
-  POSTGRES_STORAGE_BENCHMARK_VERSIONS
-} from '../scenarios/storage-versions.js';
+import { combinedBenchmarkCases } from '../scenarios/benchmark-cases.js';
 import { writeBenchmarkResult } from '../utils/output.js';
 
-const cases = [
-  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
-    const storage = postgresReplicationStorage(version);
-    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
-  }),
-  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
-    const storage = mongoReplicationStorage(version);
-    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
-  })
-];
-
-describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
+describe.each(combinedBenchmarkCases)('$scenario.id', ({ scenario, implementation }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
     const benchmark = new CombinedBenchmark(scenario, implementation, {
       runId: randomUUID(),

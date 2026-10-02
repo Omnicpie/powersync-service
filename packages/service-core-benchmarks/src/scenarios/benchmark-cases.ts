@@ -1,0 +1,130 @@
+import { env } from '../env.js';
+import { assertDistinctMongoSourceAndStorage } from '../implementations/replication/mongodb/MongoSourceBenchmarkConfiguration.js';
+import { assertDistinctPostgresSourceAndStorage } from '../implementations/replication/postgres/PostgresSourceBenchmarkConfiguration.js';
+import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
+import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
+import type { ApiBenchmarkScenario } from '../types/ApiBenchmark.js';
+import type { StorageBenchmarkImplementation, StorageBenchmarkScenario } from '../types/StorageBenchmark.js';
+import {
+  createMongoCategoryApiScenario,
+  createMongoQuickApiScenario,
+  createPostgresCategoryApiScenario,
+  createPostgresQuickApiScenario
+} from './api-scenarios.js';
+import { createCategoryCombinedCases, createQuickCombinedCases } from './combined-scenarios.js';
+import {
+  mongoReplicationStorage,
+  mongoSourceCase,
+  mongoSourceCategoryCase,
+  postgresReplicationStorage,
+  postgresSourceCase
+} from './replication-scenarios.js';
+import {
+  createMongoCategoryStorageScenario,
+  createMongoQuickStorageScenario,
+  createPostgresCategoryStorageScenario,
+  createPostgresQuickStorageScenario
+} from './storage-scenarios.js';
+import { MONGO_STORAGE_BENCHMARK_VERSIONS, POSTGRES_STORAGE_BENCHMARK_VERSIONS } from './storage-versions.js';
+
+interface ApiBenchmarkCase {
+  readonly scenario: ApiBenchmarkScenario;
+  readonly implementation: StorageBenchmarkImplementation;
+}
+
+interface StorageBenchmarkCase {
+  readonly scenario: StorageBenchmarkScenario;
+  readonly implementation: StorageBenchmarkImplementation;
+  readonly expectedStorage: StorageBenchmarkScenario['storage'];
+}
+
+export const apiBenchmarkCases: readonly ApiBenchmarkCase[] = [
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createPostgresApiCase(createPostgresCategoryApiScenario(version)),
+    createPostgresApiCase(createPostgresQuickApiScenario(version))
+  ]),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createMongoApiCase(createMongoQuickApiScenario(version)),
+    createMongoApiCase(createMongoCategoryApiScenario(version))
+  ])
+];
+
+export const storageBenchmarkCases: readonly StorageBenchmarkCase[] = [
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createPostgresStorageCase(createPostgresCategoryStorageScenario(version)),
+    createPostgresStorageCase(createPostgresQuickStorageScenario(version))
+  ]),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
+    createMongoStorageCase(createMongoQuickStorageScenario(version)),
+    createMongoStorageCase(createMongoCategoryStorageScenario(version))
+  ])
+];
+
+export const replicationBenchmarkCases = [
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = postgresReplicationStorage(version);
+    return [
+      mongoSourceCategoryCase(storage),
+      mongoSourceCase('snapshot', storage),
+      mongoSourceCase('streaming', storage),
+      postgresSourceCase(storage, assertDistinctPostgresSourceAndStorage)
+    ];
+  }),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = mongoReplicationStorage(version);
+    return [
+      mongoSourceCategoryCase(storage, assertDistinctMongoSourceAndStorage),
+      mongoSourceCase('snapshot', storage, assertDistinctMongoSourceAndStorage),
+      mongoSourceCase('streaming', storage, assertDistinctMongoSourceAndStorage),
+      postgresSourceCase(storage)
+    ];
+  })
+];
+
+export const combinedBenchmarkCases = [
+  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = postgresReplicationStorage(version);
+    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+  }),
+  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
+    const storage = mongoReplicationStorage(version);
+    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+  })
+];
+
+export const allBenchmarkScenarios = [
+  ...apiBenchmarkCases,
+  ...storageBenchmarkCases,
+  ...replicationBenchmarkCases,
+  ...combinedBenchmarkCases
+].map(({ scenario }) => scenario);
+
+function createPostgresApiCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
+  return {
+    scenario,
+    implementation: new PostgresStorageBenchmarkImplementation({ url: env.PG_STORAGE_TEST_URL })
+  };
+}
+
+function createMongoApiCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
+  return {
+    scenario,
+    implementation: new MongoStorageBenchmarkImplementation({ url: env.MONGO_TEST_URL, isCI: env.CI })
+  };
+}
+
+function createPostgresStorageCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
+  return {
+    scenario,
+    implementation: new PostgresStorageBenchmarkImplementation({ url: env.PG_STORAGE_TEST_URL }),
+    expectedStorage: { implementation: 'storage:postgres', version: scenario.storage.version }
+  };
+}
+
+function createMongoStorageCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
+  return {
+    scenario,
+    implementation: new MongoStorageBenchmarkImplementation({ url: env.MONGO_TEST_URL, isCI: env.CI }),
+    expectedStorage: { implementation: 'storage:mongodb', version: scenario.storage.version }
+  };
+}

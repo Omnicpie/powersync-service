@@ -1,66 +1,17 @@
 import { container } from '@powersync/lib-services-framework';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, test } from 'vitest';
-import { env } from '../env.js';
-import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
-import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
 import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { ApiBenchmark } from '../runner/ApiBenchmark.js';
-import {
-  createMongoCategoryApiScenario,
-  createMongoQuickApiScenario,
-  createPostgresCategoryApiScenario,
-  createPostgresQuickApiScenario
-} from '../scenarios/api-scenarios.js';
-import {
-  MONGO_STORAGE_BENCHMARK_VERSIONS,
-  POSTGRES_STORAGE_BENCHMARK_VERSIONS
-} from '../scenarios/storage-versions.js';
-import { ApiBenchmarkScenario } from '../types/ApiBenchmark.js';
-import { StorageBenchmarkImplementation } from '../types/StorageBenchmark.js';
+import { apiBenchmarkCases } from '../scenarios/benchmark-cases.js';
 import { writeBenchmarkResult } from '../utils/output.js';
 
 beforeAll(() => {
   container.registerDefaults();
 });
 
-interface ApiBenchmarkCase {
-  readonly scenario: ApiBenchmarkScenario;
-  readonly implementation: StorageBenchmarkImplementation;
-}
-
-const cases: readonly ApiBenchmarkCase[] = [
-  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createPostgresCase(createPostgresCategoryApiScenario(version)),
-    createPostgresCase(createPostgresQuickApiScenario(version))
-  ]),
-  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createMongoCase(createMongoQuickApiScenario(version)),
-    createMongoCase(createMongoCategoryApiScenario(version))
-  ])
-];
-
-function createPostgresCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
-  return {
-    scenario,
-    implementation: new PostgresStorageBenchmarkImplementation({
-      url: env.PG_STORAGE_TEST_URL
-    })
-  };
-}
-
-function createMongoCase(scenario: ApiBenchmarkScenario): ApiBenchmarkCase {
-  return {
-    scenario,
-    implementation: new MongoStorageBenchmarkImplementation({
-      url: env.MONGO_TEST_URL,
-      isCI: env.CI
-    })
-  };
-}
-
-describe.each(cases)('$scenario.id', ({ scenario, implementation }) => {
+describe.each(apiBenchmarkCases)('$scenario.id', ({ scenario, implementation }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
     const benchmark = new ApiBenchmark(scenario, implementation, {
       runId: randomUUID(),

@@ -1,63 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { env } from '../env.js';
-import { MongoStorageBenchmarkImplementation } from '../implementations/storage/MongoStorageBenchmarkImplementation.js';
-import { PostgresStorageBenchmarkImplementation } from '../implementations/storage/PostgresStorageBenchmarkImplementation.js';
 import { NodeProcessResourceMonitor } from '../monitors/NodeProcessResourceMonitor.js';
 import { createDatabaseResourceMonitors } from '../monitors/database-monitors.js';
 import { StorageBenchmark } from '../runner/StorageBenchmark.js';
-import {
-  createMongoCategoryStorageScenario,
-  createMongoQuickStorageScenario,
-  createPostgresCategoryStorageScenario,
-  createPostgresQuickStorageScenario
-} from '../scenarios/storage-scenarios.js';
-import {
-  MONGO_STORAGE_BENCHMARK_VERSIONS,
-  POSTGRES_STORAGE_BENCHMARK_VERSIONS
-} from '../scenarios/storage-versions.js';
-import { StorageBenchmarkImplementation, StorageBenchmarkScenario } from '../types/StorageBenchmark.js';
+import { storageBenchmarkCases } from '../scenarios/benchmark-cases.js';
 import { writeBenchmarkResult } from '../utils/output.js';
 
-interface StorageBenchmarkCase {
-  readonly scenario: StorageBenchmarkScenario;
-  readonly implementation: StorageBenchmarkImplementation;
-  readonly expectedStorage: StorageBenchmarkScenario['storage'];
-}
-
-const benchmarkCases: readonly StorageBenchmarkCase[] = [
-  ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createPostgresCase(createPostgresCategoryStorageScenario(version)),
-    createPostgresCase(createPostgresQuickStorageScenario(version))
-  ]),
-  ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createMongoCase(createMongoQuickStorageScenario(version)),
-    createMongoCase(createMongoCategoryStorageScenario(version))
-  ])
-];
-
-function createPostgresCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
-  return {
-    scenario,
-    implementation: new PostgresStorageBenchmarkImplementation({
-      url: env.PG_STORAGE_TEST_URL
-    }),
-    expectedStorage: { implementation: 'storage:postgres', version: scenario.storage.version }
-  };
-}
-
-function createMongoCase(scenario: StorageBenchmarkScenario): StorageBenchmarkCase {
-  return {
-    scenario,
-    implementation: new MongoStorageBenchmarkImplementation({
-      url: env.MONGO_TEST_URL,
-      isCI: env.CI
-    }),
-    expectedStorage: { implementation: 'storage:mongodb', version: scenario.storage.version }
-  };
-}
-
-describe.each(benchmarkCases)('$scenario.id', ({ scenario, implementation, expectedStorage }) => {
+describe.each(storageBenchmarkCases)('$scenario.id', ({ scenario, implementation, expectedStorage }) => {
   test('runs', { timeout: scenario.timeout_ms, sequential: true, tags: scenario.tags }, async () => {
     const benchmark = new StorageBenchmark(scenario, implementation, {
       runId: randomUUID(),
