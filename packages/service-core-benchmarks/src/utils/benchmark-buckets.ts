@@ -1,8 +1,8 @@
 import { storage } from '@powersync/service-core';
 import {
-  BaseJwtPayload,
   HydratedSyncConfig,
   mergeBuckets,
+  RequestJwtPayload,
   RequestParameters,
   ResolvedBucket
 } from '@powersync/service-sync-rules';
@@ -18,7 +18,7 @@ export interface ResolveBenchmarkBucketsOptions {
 
 export async function resolveBenchmarkBuckets(options: ResolveBenchmarkBucketsOptions): Promise<ResolvedBucket[]> {
   const globalParameters = new RequestParameters(
-    new BaseJwtPayload({ sub: BENCHMARK_USER_ID }),
+    new RequestJwtPayload({ sub: BENCHMARK_USER_ID }),
     options.syncParameters
   );
 
