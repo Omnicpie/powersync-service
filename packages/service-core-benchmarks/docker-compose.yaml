@@ -28,6 +28,8 @@ services:
 
   mongodb-source:
     image: mongo:8.0
+    ulimits:
+      nofile: 65536
     command:
       ['mongod', '--port', '27017', '--replSet', 'test-rs', '--bind_ip_all', '--setParameter', 'enableTestCommands=1']
     ports:
@@ -45,6 +47,8 @@ services:
 
   mongodb-storage:
     image: mongo:8.0
+    ulimits:
+      nofile: 65536
     command:
       ['mongod', '--port', '27018', '--replSet', 'test-rs', '--bind_ip_all', '--setParameter', 'enableTestCommands=1']
     ports:
