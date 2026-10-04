@@ -82,7 +82,7 @@ jobs:
       - name: Run Benchmarks
         id: benchmarks
         env:
-          GITHUB_SHA: ${{ steps.pr-head.outputs.sha }}
+          CUSTOM_SHA: ${{ steps.pr-head.outputs.sha }}
           BENCHMARK_TAGS_FILTER: ${{ steps.benchmark-options.outputs.tags-filter }}
         run: pnpm benchmark:test
 
