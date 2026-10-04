@@ -15,12 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      PG_STORAGE_TEST_URL: postgres://postgres:postgres@localhost:5431/powersync_storage_test
       BENCHMARK_POSTGRES_SOURCE_URL: postgres://postgres:postgres@localhost:5432/powersync_source_test
       BENCHMARK_POSTGRES_STORAGE_URL: postgres://postgres:postgres@localhost:5431/powersync_storage_test
       BENCHMARK_MONGODB_SOURCE_URL: mongodb://localhost:27017/powersync_test_data
       BENCHMARK_MONGODB_STORAGE_URL: mongodb://localhost:27018/powersync_test
-      MONGO_TEST_URL: mongodb://localhost:27018/powersync_test
       # Forks can pull public images without configuring Docker Hub credentials.
       HAS_DOCKERHUB_CREDENTIALS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
@@ -37,10 +35,22 @@ jobs:
             }
             core.setOutput('tags-filter', (match[1] ?? '').trim());
 
+      - name: Resolve pull request commit
+        id: pr-head
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data: pull } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('sha', pull.head.sha);
+
       - name: Checkout pull request
         uses: actions/checkout@v5
         with:
-          ref: refs/pull/${{ github.event.issue.number }}/head
+          ref: ${{ steps.pr-head.outputs.sha }}
           persist-credentials: false
 
       - name: Login to Docker Hub
@@ -72,6 +82,7 @@ jobs:
       - name: Run Benchmarks
         id: benchmarks
         env:
+          GITHUB_SHA: ${{ steps.pr-head.outputs.sha }}
           BENCHMARK_TAGS_FILTER: ${{ steps.benchmark-options.outputs.tags-filter }}
         run: pnpm benchmark:test
 
