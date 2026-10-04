@@ -9,7 +9,7 @@ import { generateBaselineSnapshotManifest } from './generate-baseline-snapshot-m
 const START_TIME = Date.parse('2020-01-01T00:00:00.000Z');
 
 export function generateBaselineReplicationManifest(
-  scenario: ReplicationBenchmarkScenario
+  scenario: Pick<ReplicationBenchmarkScenario, 'workload' | 'phase'>
 ): ReplicationBenchmarkManifest {
   validateWorkload(scenario);
   const snapshotManifest = generateBaselineSnapshotManifest(scenario.workload, scenario.phase === 'snapshot');
@@ -62,7 +62,7 @@ export function generateBaselineReplicationManifest(
   };
 }
 
-function validateWorkload(scenario: ReplicationBenchmarkScenario): void {
+function validateWorkload(scenario: Pick<ReplicationBenchmarkScenario, 'workload' | 'phase'>): void {
   const { snapshot_row_count, streaming_mutation_count, transaction_count, payload_bytes } = scenario.workload;
   if (![snapshot_row_count, streaming_mutation_count, transaction_count, payload_bytes].every(Number.isInteger)) {
     throw new Error('Replication workload values must be integers');

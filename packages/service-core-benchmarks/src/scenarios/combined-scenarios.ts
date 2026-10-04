@@ -40,11 +40,26 @@ export function createQuickCombinedScenario(
     mode: 'initial',
     transport: { encoding: 'ndjson', compression: 'none' },
     clients: { count: 1 },
-    workload: { snapshot_row_count: 1_000, payload_bytes: 256 },
+    workload: { snapshot_row_count: 1_000, streaming_mutation_count: 1_000, transaction_count: 10, payload_bytes: 256 },
     syncRule: createReplicationSyncRules,
     sync_parameters: {},
     expected_bucket_count: 1,
     expected_bucket_operation_count: 1_000
+  };
+}
+
+export function createStreamingCombinedScenario(
+  source: ReplicationBenchmarkProducerId,
+  storage: StorageBenchmarkImplementationId,
+  storageVersion: number
+): CombinedBenchmarkScenario {
+  const initial = createQuickCombinedScenario(source, storage, storageVersion);
+  return {
+    ...initial,
+    id: `combined.streaming.baseline.${source}.${storage}.v${storageVersion}.quick.ndjson`,
+    description: `Post-initial updates from ${source} through ${storage} to one NDJSON client`,
+    tags: initial.tags.map((tag) => (tag === 'phase:snapshot' ? 'phase:streaming' : tag)),
+    mode: 'streaming'
   };
 }
 
@@ -81,6 +96,31 @@ export function createQuickCombinedCases(
       storage,
       storage.id === 'storage:mongodb' ? assertDistinctMongoSourceAndStorage : undefined
     )
+  ];
+}
+
+export function createStreamingCombinedCases(
+  storage: ReplicationBenchmarkStorageSelection
+): readonly CombinedBenchmarkCase[] {
+  const postgresSource = postgresReplicationSource();
+  const mongoSource = mongoReplicationSource();
+  return [
+    {
+      scenario: createStreamingCombinedScenario(mongoSource.id, storage.id, storage.version),
+      implementation: new ControlledCombinedBenchmarkImplementation({
+        source: mongoSource,
+        storage,
+        validateEnvironment: storage.id === 'storage:mongodb' ? assertDistinctMongoSourceAndStorage : undefined
+      })
+    },
+    {
+      scenario: createStreamingCombinedScenario(postgresSource.id, storage.id, storage.version),
+      implementation: new ControlledCombinedBenchmarkImplementation({
+        source: postgresSource,
+        storage,
+        validateEnvironment: storage.id === 'storage:postgres' ? assertDistinctPostgresSourceAndStorage : undefined
+      })
+    }
   ];
 }
 

@@ -38,5 +38,8 @@ describe.each(apiBenchmarkCases)('$scenario.id', ({ scenario, implementation }) 
       failed_iterations: 0,
       boundaries: { http_read: { sample_count: 3 } }
     });
+    if (scenario.mode === 'streaming') {
+      expect(result.summary?.boundaries).toMatchObject({ end_to_end_streaming: { sample_count: 3 } });
+    }
   });
 });

@@ -2,7 +2,7 @@ import { BenchmarkScenario } from './BenchmarkScenario.js';
 import { StorageBenchmarkImplementationId, StorageBenchmarkWorkload } from './StorageBenchmark.js';
 
 export interface ApiClientConfiguration {
-  readonly mode: 'initial';
+  readonly mode: 'initial' | 'streaming';
   readonly transport: {
     readonly encoding: 'ndjson';
     readonly compression: 'none';

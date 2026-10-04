@@ -17,7 +17,12 @@ import {
   createToken,
   reservePort
 } from '../utils/api-utils.js';
-import { drainNdjsonResponse, NdjsonDrainObservation } from '../utils/ndjson-drain.js';
+import {
+  createNdjsonStreamReader,
+  drainNdjsonResponse,
+  NdjsonDrainObservation,
+  NdjsonStreamReader
+} from '../utils/ndjson-drain.js';
 import { Benchmark } from './Benchmark.js';
 
 const TARGET_POSITION = '1/1';
@@ -32,9 +37,12 @@ interface ApiBenchmarkIterationContext {
   readonly replicationLock: storage.ReplicationLock;
   readonly bucketStorage: storage.SyncRulesBucketStorage;
   readonly writer: storage.BucketStorageBatch;
+  readonly sourceTable: storage.SourceTable;
   readonly serviceContext: system.ServiceContextContainer;
   readonly endpoint: string;
   readonly token: string;
+  readonly streamReader?: NdjsonStreamReader;
+  readonly initialCheckpoint?: string;
 }
 
 export class ApiBenchmark extends Benchmark<
@@ -68,6 +76,7 @@ export class ApiBenchmark extends Benchmark<
     let bucketStorage: storage.SyncRulesBucketStorage | undefined;
     let writer: storage.BucketStorageBatch | undefined;
     let serviceContext: system.ServiceContextContainer | undefined;
+    let streamReader: NdjsonStreamReader | undefined;
 
     const manifest = generateBaselineStorageRows(this.scenario.workload);
 
@@ -110,17 +119,38 @@ export class ApiBenchmark extends Benchmark<
       await new CoreModule().initialize(serviceContext);
       await serviceContext.lifeCycleEngine.start();
 
+      const endpoint = `http://127.0.0.1:${port}`;
+      const token = await createToken(key.signingKey);
+      let initialCheckpoint: string | undefined;
+      if (this.scenario.mode === 'streaming') {
+        const response = await this.openSyncStream(endpoint, token, runtime.signal);
+        streamReader = createNdjsonStreamReader(response);
+        const initial = await streamReader.nextCheckpoint();
+        if (
+          initial.status !== 200 ||
+          initial.operations.length !== manifest.rows.length ||
+          initial.completedCheckpoint == null
+        ) {
+          throw new Error('Streaming API benchmark initial sync did not complete');
+        }
+        initialCheckpoint = initial.completedCheckpoint;
+      }
+
       return {
         runtime,
         replicationStream,
         replicationLock,
         bucketStorage,
         writer,
+        sourceTable,
         serviceContext,
-        endpoint: `http://127.0.0.1:${port}`,
-        token: await createToken(key.signingKey)
+        endpoint,
+        token,
+        streamReader,
+        initialCheckpoint
       };
     } catch (error) {
+      await streamReader?.close();
       await cleanup(serviceContext, writer, replicationLock, bucketStorage, error);
       throw error;
     }
@@ -130,29 +160,46 @@ export class ApiBenchmark extends Benchmark<
     context: ApiBenchmarkIterationContext,
     runtime: BenchmarkIterationRuntime
   ): Promise<NdjsonDrainObservation> {
+    if (this.scenario.mode === 'streaming') {
+      const reader = context.streamReader;
+      if (reader == null) throw new Error('Streaming API client was not initialized');
+      const rows = generateBaselineStorageRows(this.scenario.workload).rows.map((row) => ({
+        ...row,
+        id: `stream-${row.id}`
+      }));
+      runtime.metrics.startBoundary('end_to_end_streaming', 'storage_write_start');
+      try {
+        for (const row of rows) {
+          await context.writer.save({
+            sourceTable: context.sourceTable,
+            tag: storage.SaveOperationTag.INSERT,
+            after: row,
+            afterReplicaId: row.id
+          });
+        }
+        const commit = await context.writer.commit('1/2');
+        if (commit.checkpointBlocked || !commit.checkpointCreated) {
+          throw new Error('Streaming benchmark data did not create a checkpoint');
+        }
+        runtime.metrics.startBoundary('http_read', 'storage_committed');
+        const observation = await reader.nextCheckpoint();
+        runtime.metrics.endBoundary('http_read', 'client_checkpoint_complete');
+        this.recordClientCounters(observation, runtime);
+        return observation;
+      } finally {
+        runtime.metrics.endBoundary('end_to_end_streaming', 'client_checkpoint_complete');
+      }
+    }
     runtime.metrics.startBoundary('http_read', 'request_start');
     let observation: NdjsonDrainObservation;
     try {
-      const response = await fetch(`${context.endpoint}/sync/stream`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${context.token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          raw_data: true,
-          client_id: randomUUID(),
-          buckets: [],
-          parameters: this.scenario.sync_parameters
-        }),
-        signal: runtime.signal
-      });
+      const response = await this.openSyncStream(context.endpoint, context.token, runtime.signal);
       observation = await drainNdjsonResponse(response);
     } finally {
       runtime.metrics.endBoundary('http_read', 'stream_complete');
     }
 
-    runtime.metrics.setCounter('response_wire_bytes', observation.wireBytes);
-    runtime.metrics.setCounter('response_lines', observation.lines.length);
-    runtime.metrics.setCounter('bucket_operations', observation.operations.length);
-    runtime.metrics.setCounter('distinct_buckets', observation.bucketNames.length);
+    this.recordClientCounters(observation, runtime);
     return observation;
   }
 
@@ -187,10 +234,27 @@ export class ApiBenchmark extends Benchmark<
       check('response_has_bytes', observation.wireBytes > 0, { actual: observation.wireBytes })
     ];
 
+    if (this.scenario.mode === 'streaming') {
+      checks.push(
+        check('checkpoint_advanced', observation.completedCheckpoint !== context.initialCheckpoint, {
+          initial: context.initialCheckpoint,
+          actual: observation.completedCheckpoint
+        }),
+        check(
+          'post_initial_rows_only',
+          observation.operations.every((operation) => operation.object_id?.startsWith('stream-item-')),
+          {
+            operation_count: observation.operations.length
+          }
+        )
+      );
+    }
+
     return { passed: checks.every((item) => item.passed), checks };
   }
 
   protected async cleanupIteration(context: ApiBenchmarkIterationContext): Promise<void> {
+    await context.streamReader?.close();
     await cleanup(context.serviceContext, context.writer, context.replicationLock, context.bucketStorage);
   }
 
@@ -205,5 +269,26 @@ export class ApiBenchmark extends Benchmark<
 
   protected async cleanupRun(run: ApiBenchmarkRunContext): Promise<void> {
     await run.resource.dispose();
+  }
+
+  private async openSyncStream(endpoint: string, token: string, signal: AbortSignal): Promise<Response> {
+    return await fetch(`${endpoint}/sync/stream`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        raw_data: true,
+        client_id: randomUUID(),
+        buckets: [],
+        parameters: this.scenario.sync_parameters
+      }),
+      signal
+    });
+  }
+
+  private recordClientCounters(observation: NdjsonDrainObservation, runtime: BenchmarkIterationRuntime): void {
+    runtime.metrics.setCounter('response_wire_bytes', observation.wireBytes);
+    runtime.metrics.setCounter('response_lines', observation.lines.length);
+    runtime.metrics.setCounter('bucket_operations', observation.operations.length);
+    runtime.metrics.setCounter('distinct_buckets', observation.bucketNames.length);
   }
 }

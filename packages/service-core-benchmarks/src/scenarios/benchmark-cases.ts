@@ -8,10 +8,16 @@ import type { StorageBenchmarkImplementation, StorageBenchmarkScenario } from '.
 import {
   createMongoCategoryApiScenario,
   createMongoQuickApiScenario,
+  createMongoStreamingApiScenario,
   createPostgresCategoryApiScenario,
-  createPostgresQuickApiScenario
+  createPostgresQuickApiScenario,
+  createPostgresStreamingApiScenario
 } from './api-scenarios.js';
-import { createCategoryCombinedCases, createQuickCombinedCases } from './combined-scenarios.js';
+import {
+  createCategoryCombinedCases,
+  createQuickCombinedCases,
+  createStreamingCombinedCases
+} from './combined-scenarios.js';
 import {
   mongoReplicationStorage,
   mongoSourceCase,
@@ -41,11 +47,13 @@ interface StorageBenchmarkCase {
 export const apiBenchmarkCases: readonly ApiBenchmarkCase[] = [
   ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
     createPostgresApiCase(createPostgresCategoryApiScenario(version)),
-    createPostgresApiCase(createPostgresQuickApiScenario(version))
+    createPostgresApiCase(createPostgresQuickApiScenario(version)),
+    createPostgresApiCase(createPostgresStreamingApiScenario(version))
   ]),
   ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
     createMongoApiCase(createMongoQuickApiScenario(version)),
-    createMongoApiCase(createMongoCategoryApiScenario(version))
+    createMongoApiCase(createMongoCategoryApiScenario(version)),
+    createMongoApiCase(createMongoStreamingApiScenario(version))
   ])
 ];
 
@@ -84,11 +92,19 @@ export const replicationBenchmarkCases = [
 export const combinedBenchmarkCases = [
   ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
     const storage = postgresReplicationStorage(version);
-    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+    return [
+      ...createCategoryCombinedCases(storage),
+      ...createQuickCombinedCases(storage),
+      ...createStreamingCombinedCases(storage)
+    ];
   }),
   ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {
     const storage = mongoReplicationStorage(version);
-    return [...createCategoryCombinedCases(storage), ...createQuickCombinedCases(storage)];
+    return [
+      ...createCategoryCombinedCases(storage),
+      ...createQuickCombinedCases(storage),
+      ...createStreamingCombinedCases(storage)
+    ];
   })
 ];
 

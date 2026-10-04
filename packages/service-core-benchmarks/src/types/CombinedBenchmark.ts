@@ -1,12 +1,19 @@
 import { ApiClientConfiguration } from './ApiBenchmark.js';
 import { BenchmarkIterationRuntime } from './BenchmarkRunOptions.js';
 import { BenchmarkScenario } from './BenchmarkScenario.js';
-import { ReplicationBenchmarkProducerId, ReplicationPositionComparison } from './ReplicationBenchmark.js';
-import { SnapshotBenchmarkManifest, SnapshotBenchmarkTarget } from './SnapshotBenchmark.js';
+import {
+  ReplicationBenchmarkManifest,
+  ReplicationBenchmarkProducerId,
+  ReplicationBenchmarkTarget,
+  ReplicationPositionComparison
+} from './ReplicationBenchmark.js';
+import { SnapshotBenchmarkTarget } from './SnapshotBenchmark.js';
 import { StorageBenchmarkImplementationId } from './StorageBenchmark.js';
 
 export interface CombinedBenchmarkWorkload {
   readonly snapshot_row_count: number;
+  readonly streaming_mutation_count: number;
+  readonly transaction_count: number;
   readonly payload_bytes: number;
 }
 
@@ -28,13 +35,13 @@ export interface CombinedBenchmarkRunContext {
 export interface CombinedBenchmarkIterationContext {
   readonly runtime: BenchmarkIterationRuntime;
   readonly resource: CombinedBenchmarkIterationResource;
-  readonly manifest: SnapshotBenchmarkManifest;
+  readonly manifest: ReplicationBenchmarkManifest;
 }
 
 export interface CombinedBenchmarkIterationSetup {
   readonly iterationId: string;
   readonly scenario: CombinedBenchmarkScenario;
-  readonly manifest: SnapshotBenchmarkManifest;
+  readonly manifest: ReplicationBenchmarkManifest;
 }
 
 export interface CombinedBenchmarkObservation {
@@ -66,7 +73,8 @@ export interface CombinedBenchmarkIterationResource {
   readonly token: string;
   readonly target: SnapshotBenchmarkTarget;
   releaseReplication(waitForSnapshot?: boolean): Promise<CombinedReleaseObservation>;
-  observeCheckpoint(): Promise<CombinedBenchmarkObservation>;
+  commitTransaction(transactionId: string): Promise<ReplicationBenchmarkTarget>;
+  observeCheckpoint(target?: ReplicationBenchmarkTarget): Promise<CombinedBenchmarkObservation>;
   comparePosition(checkpoint: string, target: SnapshotBenchmarkTarget): ReplicationPositionComparison;
   dispose(): Promise<void>;
 }

@@ -60,10 +60,14 @@ export function rateDefinitions(layer: BenchmarkLayer): Record<string, readonly 
         replication_streaming: [...replicationCounters, 'source_transactions']
       };
     case 'api':
-      return { http_read: ['response_wire_bytes', 'response_lines', 'bucket_operations'] };
+      return {
+        http_read: ['response_wire_bytes', 'response_lines', 'bucket_operations'],
+        end_to_end_streaming: ['response_wire_bytes', 'bucket_operations']
+      };
     case 'combined':
       return {
         replication_snapshot: [...replicationCounters, 'storage_put_operations'],
+        replication_streaming: [...replicationCounters, 'storage_put_operations', 'source_transactions'],
         http_read: [
           'response_wire_bytes',
           'protocol_plaintext_bytes',
@@ -71,7 +75,8 @@ export function rateDefinitions(layer: BenchmarkLayer): Record<string, readonly 
           'client_operations',
           'client_put_operations'
         ],
-        end_to_end_snapshot: ['client_operations']
+        end_to_end_snapshot: ['client_operations'],
+        end_to_end_streaming: ['client_operations']
       };
   }
 }

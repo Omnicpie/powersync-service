@@ -1,6 +1,7 @@
 import { CombinedChildController, CombinedChildTransport } from '../../combined/CombinedChildController.js';
 import { ForkedCombinedChildTransport } from '../../combined/ForkedCombinedChildTransport.js';
 import { fixtureEnvironment } from '../../env.js';
+import { generateBaselineSnapshotManifest } from '../../generators/generate-baseline-snapshot-manifest.js';
 import { CombinedChildResourceMonitor } from '../../monitors/CombinedChildResourceMonitor.js';
 import { CombinedBenchmarkImplementation, CombinedBenchmarkRunResource } from '../../types/CombinedBenchmark.js';
 import { ReplicationBenchmarkSourceAdapter } from '../../types/ReplicationBenchmark.js';
@@ -107,7 +108,12 @@ export class ControlledCombinedBenchmarkImplementation implements CombinedBenchm
           }
 
           await source.createSchema(setup.iterationId);
-          const snapshotTarget = await source.populateSnapshot(setup.manifest);
+          const snapshotTarget = await source.populateSnapshot(
+            setup.scenario.mode === 'streaming'
+              ? generateBaselineSnapshotManifest(setup.scenario.workload)
+              : setup.manifest
+          );
+          if (setup.scenario.mode === 'streaming') await source.prepareTransactions(setup.manifest);
           Object.assign(environment, await source.collectMetadata());
 
           const key = await createBenchmarkKey();

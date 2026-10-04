@@ -36,13 +36,122 @@ interface NdjsonDrainState {
 }
 
 export async function drainNdjsonResponse(response: Response): Promise<NdjsonDrainObservation> {
+  const reader = createNdjsonStreamReader(response);
+  try {
+    return await reader.nextCheckpoint();
+  } finally {
+    await reader.close();
+  }
+}
+
+export interface NdjsonStreamReader {
+  nextCheckpoint(): Promise<NdjsonDrainObservation>;
+  close(): Promise<void>;
+}
+
+export async function drainNdjsonUntilCheckpoint(
+  reader: NdjsonStreamReader,
+  targetCheckpoint: string
+): Promise<NdjsonDrainObservation> {
+  const lines: unknown[] = [];
+  const operations: NdjsonDataOperation[] = [];
+  const bucketNames = new Set<string>();
+  const dataBucketNames = new Set<string>();
+  let wireBytes = 0;
+  let firstByteAtNs: string | null = null;
+  let checkpointLineIndex: number | null = null;
+  let firstDataLineIndex: number | null = null;
+  let latest: NdjsonDrainObservation;
+  do {
+    latest = await reader.nextCheckpoint();
+    const offset = lines.length;
+    lines.push(...latest.lines);
+    operations.push(...latest.operations);
+    latest.bucketNames.forEach((name) => bucketNames.add(name));
+    latest.dataBucketNames.forEach((name) => dataBucketNames.add(name));
+    wireBytes += latest.wireBytes;
+    firstByteAtNs ??= latest.firstByteAtNs;
+    checkpointLineIndex ??= latest.checkpointLineIndex == null ? null : offset + latest.checkpointLineIndex;
+    firstDataLineIndex ??= latest.firstDataLineIndex == null ? null : offset + latest.firstDataLineIndex;
+  } while (latest.completedCheckpoint == null || BigInt(latest.completedCheckpoint) < BigInt(targetCheckpoint));
+  return {
+    ...latest,
+    lines,
+    operations,
+    bucketNames: [...bucketNames].sort(),
+    dataBucketNames: [...dataBucketNames].sort(),
+    wireBytes,
+    firstByteAtNs,
+    checkpointLineIndex,
+    firstDataLineIndex,
+    completionLineIndex: lines.length - 1
+  };
+}
+
+export function createNdjsonStreamReader(response: Response): NdjsonStreamReader {
   if (response.body == null) {
     throw new Error('API response did not include a body');
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state: NdjsonDrainState = {
+  let pending = '';
+  let closed = false;
+  return {
+    async nextCheckpoint() {
+      if (closed) throw new Error('NDJSON stream reader is closed');
+      const state = createDrainState();
+      let wireBytes = 0;
+      let firstByteAtNs: string | null = null;
+      while (state.completedCheckpoint == null) {
+        const lineEnd = pending.indexOf('\n');
+        if (lineEnd >= 0) {
+          const line = pending.slice(0, lineEnd + 1);
+          pending = pending.slice(lineEnd + 1);
+          wireBytes += Buffer.byteLength(line);
+          consumeLines(line, state);
+          continue;
+        }
+        const chunk = await reader.read();
+        if (chunk.done) {
+          pending += decoder.decode();
+          if (pending.length > 0) throw new Error('API response ended with an incomplete NDJSON line');
+          throw new Error('API response ended before checkpoint_complete');
+        }
+        firstByteAtNs ??= process.hrtime.bigint().toString();
+        pending += decoder.decode(chunk.value, { stream: true });
+      }
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        lines: state.lines,
+        wireBytes,
+        firstByteAtNs,
+        completedCheckpoint: state.completedCheckpoint,
+        checkpointLastOpId: state.checkpointLastOpId,
+        operations: state.operations,
+        bucketNames: [...state.bucketNames].sort(),
+        dataBucketNames: [...state.dataBucketNames].sort(),
+        checkpointLineIndex: state.checkpointLineIndex,
+        firstDataLineIndex: state.firstDataLineIndex,
+        completionLineIndex: state.completionLineIndex,
+        completedAtNs: process.hrtime.bigint().toString()
+      };
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      try {
+        await reader.cancel();
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  };
+}
+
+function createDrainState(): NdjsonDrainState {
+  return {
     lines: [],
     operations: [],
     bucketNames: new Set(),
@@ -53,81 +162,6 @@ export async function drainNdjsonResponse(response: Response): Promise<NdjsonDra
     firstDataLineIndex: null,
     completionLineIndex: null
   };
-  let pending = '';
-  let wireBytes = 0;
-  let firstByteAtNs: string | null = null;
-  let completedAtNs: string | null = null;
-  let cancellationAttempted = false;
-  let primaryError: unknown;
-
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-
-      if (firstByteAtNs == null) {
-        firstByteAtNs = process.hrtime.bigint().toString();
-      }
-
-      wireBytes += chunk.value.byteLength;
-      pending += decoder.decode(chunk.value, { stream: true });
-      pending = consumeLines(pending, state);
-      if (state.completedCheckpoint != null) {
-        completedAtNs = process.hrtime.bigint().toString();
-        cancellationAttempted = true;
-        await reader.cancel();
-        pending = '';
-        break;
-      }
-    }
-
-    if (state.completedCheckpoint == null) {
-      pending += decoder.decode();
-      pending = consumeLines(pending, state);
-
-      if (pending.length > 0) {
-        throw new Error('API response ended with an incomplete NDJSON line');
-      }
-      if (state.completedCheckpoint == null) {
-        throw new Error('API response ended before checkpoint_complete');
-      }
-      completedAtNs = process.hrtime.bigint().toString();
-    }
-
-    return {
-      status: response.status,
-      headers: Object.fromEntries(response.headers.entries()),
-      lines: state.lines,
-      wireBytes,
-      firstByteAtNs,
-      completedCheckpoint: state.completedCheckpoint,
-      checkpointLastOpId: state.checkpointLastOpId,
-      operations: state.operations,
-      bucketNames: [...state.bucketNames].sort(),
-      dataBucketNames: [...state.dataBucketNames].sort(),
-      checkpointLineIndex: state.checkpointLineIndex,
-      firstDataLineIndex: state.firstDataLineIndex,
-      completionLineIndex: state.completionLineIndex,
-      completedAtNs
-    };
-  } catch (error) {
-    primaryError = error;
-    if (!cancellationAttempted) {
-      cancellationAttempted = true;
-      try {
-        await reader.cancel();
-      } catch {}
-    }
-    throw error;
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch (error) {
-      if (primaryError == null) {
-        throw error;
-      }
-    }
-  }
 }
 
 function consumeLines(input: string, state: NdjsonDrainState): string {

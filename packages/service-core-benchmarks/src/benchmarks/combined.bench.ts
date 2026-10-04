@@ -32,11 +32,18 @@ describe.each(combinedBenchmarkCases)('$scenario.id', ({ scenario, implementatio
       measured_iterations: 3,
       successful_iterations: 3,
       failed_iterations: 0,
-      boundaries: {
-        replication_snapshot: { sample_count: 3 },
-        http_read: { sample_count: 3 },
-        end_to_end_snapshot: { sample_count: 3 }
-      }
+      boundaries:
+        scenario.mode === 'streaming'
+          ? {
+              replication_streaming: { sample_count: 3 },
+              http_read: { sample_count: 3 },
+              end_to_end_streaming: { sample_count: 3 }
+            }
+          : {
+              replication_snapshot: { sample_count: 3 },
+              http_read: { sample_count: 3 },
+              end_to_end_snapshot: { sample_count: 3 }
+            }
     });
   });
 });

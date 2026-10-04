@@ -90,9 +90,15 @@ export class ControlledCombinedIterationResource implements CombinedBenchmarkIte
     });
   }
 
-  async observeCheckpoint(): Promise<CombinedBenchmarkObservation> {
+  async commitTransaction(transactionId: string): Promise<ReplicationBenchmarkTarget> {
+    const transaction = this.setup.manifest.transactions.find((candidate) => candidate.id === transactionId);
+    if (transaction == null) throw new Error(`Unknown benchmark transaction ${transactionId}`);
+    return await this.source.commitTransaction(transaction);
+  }
+
+  async observeCheckpoint(target: ReplicationBenchmarkTarget = this.target): Promise<CombinedBenchmarkObservation> {
     return await waitForCombinedTargetEvidence({
-      target: this.target,
+      target,
       collectEvidence: () => this.controller.request('collect_evidence', {}, this.setup.iterationId),
       comparePosition: (checkpoint, target) => this.source.comparePosition(checkpoint, target)
     });

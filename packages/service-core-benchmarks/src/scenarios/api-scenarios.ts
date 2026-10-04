@@ -14,6 +14,28 @@ export function createMongoQuickApiScenario(version: number): ApiBenchmarkScenar
   return createQuickApiScenario('storage:mongodb', version);
 }
 
+export function createPostgresStreamingApiScenario(version: number): ApiBenchmarkScenario {
+  return createStreamingApiScenario('storage:postgres', version);
+}
+
+export function createMongoStreamingApiScenario(version: number): ApiBenchmarkScenario {
+  return createStreamingApiScenario('storage:mongodb', version);
+}
+
+function createStreamingApiScenario(
+  implementation: StorageBenchmarkImplementationId,
+  version: number
+): ApiBenchmarkScenario {
+  const initial = createQuickApiScenario(implementation, version);
+  return {
+    ...initial,
+    id: `api.streaming.baseline.direct.${implementation}.v${version}.quick.ndjson`,
+    description: `Deliver post-initial updates to one NDJSON client from ${implementation}`,
+    tags: initial.tags.map((tag) => (tag === 'phase:snapshot' ? 'phase:streaming' : tag)),
+    mode: 'streaming'
+  };
+}
+
 export function createMongoCategoryApiScenario(version: number): ApiBenchmarkScenario {
   const scenario = createMongoQuickApiScenario(version);
   return {
