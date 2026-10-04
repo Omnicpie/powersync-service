@@ -8,7 +8,6 @@ export async function setup() {
   if (args.some((arg) => ['--list-tags', '--help', '-h', '--version', '-v'].includes(arg))) return;
 
   let gitSha: string | null = process.env.CUSTOM_SHA ?? null;
-  console.log('gitsh', gitSha);
   if (gitSha == null) {
     try {
       gitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -27,7 +26,7 @@ export async function setup() {
   });
 
   process.env.BENCHMARK_RUN_DIRECTORY = suite.directory;
-  console.info(`Benchmark suite: ${suite.manifest.run_id} [CMMT]: ${suite.manifest.git_sha}`);
+  console.info(`Benchmark suite: ${suite.manifest.run_id}`);
 
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `run-id=${suite.manifest.run_id}\nrun-directory=${suite.directory}\n`);
