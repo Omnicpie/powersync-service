@@ -6,6 +6,7 @@ export const counterUnits: Record<string, string> = {
   source_transactions: 'transactions',
   source_logical_bytes: 'bytes',
   payload_bytes: 'bytes',
+  read_data_bytes: 'bytes',
   writer_save_calls: 'calls',
   writer_flushes: 'flushes',
   bucket_operations: 'ops',
@@ -53,7 +54,11 @@ const replicationCounters = [
 export function rateDefinitions(layer: BenchmarkLayer): Record<string, readonly string[]> {
   switch (layer) {
     case 'storage':
-      return { storage_write: replicationCounters };
+      return {
+        storage_write: replicationCounters,
+        storage_read: ['bucket_operations', 'read_data_bytes'],
+        storage_write_read: ['bucket_operations', 'read_data_bytes']
+      };
     case 'replication':
       return {
         replication_snapshot: replicationCounters,

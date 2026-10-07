@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BenchmarkResult, BenchmarkStatisticSummary } from '../types/BenchmarkResult.js';
+import type { StorageBenchmarkScenario } from '../types/StorageBenchmark.js';
 import { summarizeBenchmarkIterations } from './benchmark-summary.js';
 import type { SuiteManifest } from './output.js';
 
@@ -117,7 +118,7 @@ function validateResult(value: unknown): asserts value is BenchmarkResult {
 function primaryBoundary(result: BenchmarkResult): string {
   switch (result.scenario.layer) {
     case 'storage':
-      return 'storage_write';
+      return (result.scenario as StorageBenchmarkScenario).primary_boundary;
     case 'api':
       return 'http_read';
     case 'combined':

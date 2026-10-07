@@ -8,6 +8,7 @@ import {
   StorageBenchmarkItem,
   StorageBenchmarkIterationContext,
   StorageBenchmarkObservation,
+  StorageBenchmarkReadObservation,
   StorageBenchmarkRunContext,
   StorageBenchmarkScenario
 } from '../types/StorageBenchmark.js';
@@ -74,6 +75,11 @@ export class StorageBenchmark extends Benchmark<
       const sourceTable = await resolveTestTable(writer, 'benchmark_items', ['id'], run.resource);
       await writer.markAllSnapshotDone('0/0');
 
+      let seedCommit: storage.CheckpointResult | undefined;
+      if (this.scenario.mode === 'read') {
+        seedCommit = await this.writeRows({ writer, sourceTable, manifest, signal: runtime.signal });
+      }
+
       return {
         runtime,
         replicationStream,
@@ -84,7 +90,8 @@ export class StorageBenchmark extends Benchmark<
         sourceTable,
         manifest,
         flushes,
-        targetPosition: TARGET_POSITION
+        targetPosition: TARGET_POSITION,
+        seedCommit
       };
     } catch (error) {
       await this.cleanupPartialIteration(writer, replicationLock, bucketStorage, error);
@@ -97,30 +104,45 @@ export class StorageBenchmark extends Benchmark<
     runtime: StorageBenchmarkIterationContext['runtime']
   ): Promise<StorageBenchmarkObservation> {
     runtime.signal.throwIfAborted();
-    runtime.metrics.startBoundary('storage_write', 'first_writer_save');
-
-    for (const row of context.manifest.rows) {
-      runtime.signal.throwIfAborted();
-      await context.writer.save({
+    if (this.scenario.mode === 'write-read') {
+      runtime.metrics.startBoundary('storage_write_read', 'first_writer_save');
+    }
+    let commit = context.seedCommit;
+    if (this.scenario.mode !== 'read') {
+      runtime.metrics.startBoundary('storage_write', 'first_writer_save');
+      commit = await this.writeRows({
+        writer: context.writer,
         sourceTable: context.sourceTable,
-        tag: storage.SaveOperationTag.INSERT,
-        after: row,
-        afterReplicaId: row.id
+        manifest: context.manifest,
+        signal: runtime.signal
       });
+      runtime.metrics.endBoundary('storage_write', 'checkpoint_safe_commit');
+      runtime.metrics.setCounter('writer_save_calls', context.manifest.rows.length);
+      runtime.metrics.setCounter('writer_flushes', context.flushes.count);
     }
-
-    const commit = await context.writer.commit(context.targetPosition);
-    runtime.metrics.endBoundary('storage_write', 'checkpoint_safe_commit');
-    if (commit.checkpointBlocked || !commit.checkpointCreated) {
-      throw new Error(`Storage commit did not create an unblocked checkpoint: ${JSON.stringify(commit)}`);
-    }
+    if (commit == null) throw new Error('Storage benchmark has no committed checkpoint');
     runtime.metrics.setCounter('source_rows', context.manifest.rows.length);
     runtime.metrics.setCounter('source_logical_bytes', context.manifest.sourceLogicalBytes);
     runtime.metrics.setCounter('payload_bytes', context.manifest.payloadBytes);
-    runtime.metrics.setCounter('writer_save_calls', context.manifest.rows.length);
-    runtime.metrics.setCounter('writer_flushes', context.flushes.count);
 
-    return { commit };
+    let read: StorageBenchmarkReadObservation | undefined;
+    if (this.scenario.mode !== 'write') {
+      runtime.metrics.startBoundary('storage_read', 'checkpoint_read_start');
+      read = await this.readStorage(context, runtime.signal);
+      runtime.metrics.endBoundary('storage_read', 'bucket_download_complete');
+      if (this.scenario.mode === 'write-read') {
+        runtime.metrics.endBoundary('storage_write_read', 'bucket_download_complete');
+      }
+      const operations = read.chunks.flatMap((chunk) => chunk.chunkData.data);
+      runtime.metrics.setCounter(
+        'read_data_bytes',
+        operations.reduce((bytes, op) => bytes + Buffer.byteLength(op.data ?? '', 'utf8'), 0)
+      );
+      runtime.metrics.setCounter('bucket_operations', operations.length);
+      runtime.metrics.setCounter('distinct_buckets', read.buckets.length);
+      runtime.metrics.setCounter('parameter_operations', 0);
+    }
+    return { commit, read };
   }
 
   protected async verifyIteration(
@@ -128,16 +150,8 @@ export class StorageBenchmark extends Benchmark<
     context: StorageBenchmarkIterationContext,
     runtime: StorageBenchmarkIterationContext['runtime']
   ): Promise<BenchmarkCorrectnessResult> {
-    const checkpoint = await context.storage.getCheckpoint();
-    const buckets = await resolveBenchmarkBuckets({
-      syncRules: context.storage.getParsedSyncRules({ defaultSchema: SOURCE_TABLE.schema }),
-      checkpoint,
-      syncParameters: this.scenario.sync_parameters
-    });
-    const chunks = await new StorageDataHelpers(context.storage, context.syncRulesContent).getAllBucketData(
-      bucketRequests(buckets),
-      checkpoint
-    );
+    const { checkpoint, buckets, checksums, chunks } =
+      observation.read ?? (await this.readStorage(context, runtime.signal));
     const operations = chunks.flatMap((chunk) => chunk.chunkData.data);
     const firstExpected = context.manifest.rows[0];
     const lastExpected = context.manifest.rows.at(-1)!;
@@ -157,6 +171,18 @@ export class StorageBenchmark extends Benchmark<
         expected: this.scenario.expected_bucket_count,
         actual: buckets.length
       }),
+      check('checksum_count', checksums.size === buckets.length, {
+        expected: buckets.length,
+        actual: checksums.size
+      }),
+      check(
+        'checksum_operations',
+        [...checksums.values()].reduce((count, item) => count + item.count, 0) === operations.length,
+        {
+          expected: operations.length,
+          actual: [...checksums.values()].reduce((count, item) => count + item.count, 0)
+        }
+      ),
       check('operation_count', operations.length === this.scenario.expected_bucket_operation_count, {
         expected: this.scenario.expected_bucket_operation_count,
         actual: operations.length
@@ -193,6 +219,52 @@ export class StorageBenchmark extends Benchmark<
       passed: checks.every((item) => item.passed),
       checks
     };
+  }
+
+  private async writeRows(options: {
+    writer: storage.BucketStorageBatch;
+    sourceTable: storage.SourceTable;
+    manifest: StorageBenchmarkIterationContext['manifest'];
+    signal: AbortSignal;
+  }): Promise<storage.CheckpointResult> {
+    for (const row of options.manifest.rows) {
+      options.signal.throwIfAborted();
+      await options.writer.save({
+        sourceTable: options.sourceTable,
+        tag: storage.SaveOperationTag.INSERT,
+        after: row,
+        afterReplicaId: row.id
+      });
+    }
+    const commit = await options.writer.commit(TARGET_POSITION);
+    if (commit.checkpointBlocked || !commit.checkpointCreated) {
+      throw new Error(`Storage commit did not create an unblocked checkpoint: ${JSON.stringify(commit)}`);
+    }
+    return commit;
+  }
+
+  private async readStorage(
+    context: StorageBenchmarkIterationContext,
+    signal: AbortSignal
+  ): Promise<StorageBenchmarkReadObservation> {
+    signal.throwIfAborted();
+    const checkpoint = await context.storage.getCheckpoint();
+    const buckets = await resolveBenchmarkBuckets({
+      syncRules: context.storage.getParsedSyncRules({ defaultSchema: SOURCE_TABLE.schema }),
+      checkpoint,
+      syncParameters: this.scenario.sync_parameters
+    });
+    const requests = bucketRequests(buckets);
+    const checksums = await context.storage.getChecksums(
+      checkpoint,
+      requests.map(({ bucket, source }) => ({ bucket, source })),
+      { requestHint: 'bulk' }
+    );
+    const chunks = await new StorageDataHelpers(context.storage, context.syncRulesContent).getAllBucketData(
+      requests,
+      checkpoint
+    );
+    return { checkpoint, buckets, checksums, chunks };
   }
 
   protected async cleanupIteration(context: StorageBenchmarkIterationContext): Promise<void> {

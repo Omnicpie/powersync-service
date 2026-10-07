@@ -15,7 +15,8 @@ export interface StorageBenchmarkScenario extends BenchmarkScenario<StorageBench
     readonly implementation: StorageBenchmarkImplementationId;
     readonly version: number;
   };
-  readonly mode: 'write';
+  readonly mode: 'write' | 'read' | 'write-read';
+  readonly primary_boundary: 'storage_write_read' | 'storage_read' | 'storage_write';
   readonly flush_policy: 'automatic';
 }
 
@@ -75,8 +76,17 @@ export interface StorageBenchmarkIterationContext {
   readonly manifest: StorageBenchmarkManifest;
   readonly flushes: StorageBenchmarkFlushCounter;
   readonly targetPosition: string;
+  readonly seedCommit?: storage.CheckpointResult;
 }
 
 export interface StorageBenchmarkObservation {
   readonly commit: storage.CheckpointResult;
+  readonly read?: StorageBenchmarkReadObservation;
+}
+
+export interface StorageBenchmarkReadObservation {
+  readonly checkpoint: storage.ReplicationCheckpoint;
+  readonly buckets: readonly import('@powersync/service-sync-rules').ResolvedBucket[];
+  readonly checksums: import('@powersync/service-core').ChecksumMap;
+  readonly chunks: readonly storage.SyncBucketDataChunk[];
 }

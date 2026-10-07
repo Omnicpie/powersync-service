@@ -71,12 +71,11 @@ describe.each(storageBenchmarkCases)('$scenario.id', ({ scenario, implementation
       successful_iterations: 3,
       failed_iterations: 0,
       boundaries: {
-        storage_write: { sample_count: 3 }
+        [scenario.primary_boundary]: { sample_count: 3 }
       },
       counters: {
         source_rows: { sample_count: 3, min: 10_000, max: 10_000 },
         payload_bytes: { sample_count: 3, min: 2_560_000, max: 2_560_000 },
-        writer_save_calls: { sample_count: 3, min: 10_000, max: 10_000 },
         bucket_operations: { sample_count: 3, min: 10_000, max: 10_000 },
         parameter_operations: { sample_count: 3, min: 0, max: 0 },
         distinct_buckets: {
@@ -86,5 +85,13 @@ describe.each(storageBenchmarkCases)('$scenario.id', ({ scenario, implementation
         }
       }
     });
+    if (scenario.mode !== 'write') {
+      expect(result.summary?.boundaries.storage_read?.sample_count).toBe(3);
+      expect(result.summary?.counters.read_data_bytes?.min).toBeGreaterThan(0);
+    }
+    if (scenario.mode !== 'read') {
+      expect(result.summary?.boundaries.storage_write?.sample_count).toBe(3);
+      expect(result.summary?.counters.writer_save_calls?.min).toBe(10_000);
+    }
   });
 });

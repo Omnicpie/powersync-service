@@ -29,7 +29,9 @@ import {
   createMongoCategoryStorageScenario,
   createMongoQuickStorageScenario,
   createPostgresCategoryStorageScenario,
-  createPostgresQuickStorageScenario
+  createPostgresQuickStorageScenario,
+  createStorageReadScenario,
+  createStorageWriteReadScenario
 } from './storage-scenarios.js';
 import { MONGO_STORAGE_BENCHMARK_VERSIONS, POSTGRES_STORAGE_BENCHMARK_VERSIONS } from './storage-versions.js';
 
@@ -59,14 +61,21 @@ export const apiBenchmarkCases: readonly ApiBenchmarkCase[] = [
 
 export const storageBenchmarkCases: readonly StorageBenchmarkCase[] = [
   ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createPostgresStorageCase(createPostgresCategoryStorageScenario(version)),
-    createPostgresStorageCase(createPostgresQuickStorageScenario(version))
+    ...createStorageModeCases(createPostgresCategoryStorageScenario(version), createPostgresStorageCase),
+    ...createStorageModeCases(createPostgresQuickStorageScenario(version), createPostgresStorageCase)
   ]),
   ...MONGO_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => [
-    createMongoStorageCase(createMongoQuickStorageScenario(version)),
-    createMongoStorageCase(createMongoCategoryStorageScenario(version))
+    ...createStorageModeCases(createMongoQuickStorageScenario(version), createMongoStorageCase),
+    ...createStorageModeCases(createMongoCategoryStorageScenario(version), createMongoStorageCase)
   ])
 ];
+
+function createStorageModeCases(
+  write: StorageBenchmarkScenario,
+  createCase: (scenario: StorageBenchmarkScenario) => StorageBenchmarkCase
+): StorageBenchmarkCase[] {
+  return [write, createStorageReadScenario(write), createStorageWriteReadScenario(write)].map(createCase);
+}
 
 export const replicationBenchmarkCases = [
   ...POSTGRES_STORAGE_BENCHMARK_VERSIONS.flatMap((version) => {

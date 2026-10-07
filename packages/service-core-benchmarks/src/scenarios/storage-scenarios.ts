@@ -47,6 +47,26 @@ export function createMongoCategoryStorageScenario(version: number): StorageBenc
   };
 }
 
+export function createStorageReadScenario(write: StorageBenchmarkScenario): StorageBenchmarkScenario {
+  return {
+    ...write,
+    id: write.id.replace('storage.write.', 'storage.read.'),
+    description: `Read ${write.workload.row_count} rows from ${write.expected_bucket_count} bucket${write.expected_bucket_count === 1 ? '' : 's'} in ${write.storage.implementation} bucket storage`,
+    primary_boundary: 'storage_read',
+    mode: 'read'
+  };
+}
+
+export function createStorageWriteReadScenario(write: StorageBenchmarkScenario): StorageBenchmarkScenario {
+  return {
+    ...write,
+    id: write.id.replace('storage.write.', 'storage.write-read.'),
+    description: `Write and read ${write.workload.row_count} rows in ${write.storage.implementation} bucket storage across ${write.expected_bucket_count} bucket${write.expected_bucket_count === 1 ? '' : 's'}`,
+    primary_boundary: 'storage_write_read',
+    mode: 'write-read'
+  };
+}
+
 function createQuickStorageScenario(
   implementation: StorageBenchmarkImplementationId,
   description: string,
@@ -67,6 +87,7 @@ function createQuickStorageScenario(
       version: version
     },
     mode: 'write',
+    primary_boundary: 'storage_write',
     flush_policy: 'automatic',
     workload: {
       row_count: 10_000,
